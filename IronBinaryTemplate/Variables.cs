@@ -489,10 +489,21 @@ namespace IronBinaryTemplate
             return new BinaryTemplateString(str);
         }
 
+        public static implicit operator byte[](BinaryTemplateString str)
+        {
+            return str.data;
+        }
+
         public static implicit operator BinaryTemplateString(sbyte[] str)
         {
             return new BinaryTemplateString((object)str as byte[]);
         }
+
+        public static implicit operator sbyte[](BinaryTemplateString str)
+        {
+            return (object)str.data as sbyte[];
+        }
+
         public BinaryTemplateString(byte[] data, Encoding encoding = null)
         {
             this.data = data;
@@ -502,6 +513,20 @@ namespace IronBinaryTemplate
         {
             this.encoding = encoding == null ? Encoding.UTF8 : encoding;
             this.data = this.encoding.GetBytes(str);
+        }
+        public static BinaryTemplateString operator +(BinaryTemplateString s1, byte b)
+        {
+            var newstr = new byte[s1.data.Length + 1];
+            s1.data.CopyTo(newstr, 0);
+            newstr[s1.data.Length] = b;
+            return new BinaryTemplateString(newstr, s1.encoding);
+        }
+        public static BinaryTemplateString operator +(BinaryTemplateString s1, byte[] s2)
+        {
+            var newstr = new byte[s1.data.Length + s2.Length];
+            s1.data.CopyTo(newstr, 0);
+            s2.CopyTo(newstr, s1.data.Length);
+            return new BinaryTemplateString(newstr, s1.encoding);
         }
         public static bool operator ==(BinaryTemplateString s1, BinaryTemplateString s2)
         {

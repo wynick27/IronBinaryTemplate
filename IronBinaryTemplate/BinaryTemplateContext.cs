@@ -235,6 +235,20 @@ namespace IronBinaryTemplate
             }
         }
         [TemplateCallable]
+        protected virtual BinaryTemplateString GetFileName()
+        {
+            return new BinaryTemplateString(GetFileNameW());
+        }
+
+        [TemplateCallable]
+        protected virtual string GetFileNameW()
+        {
+            if (CurrentReader.BaseStream is FileStream fileStream)
+                return fileStream.Name;
+            else
+                return "";
+        }
+        [TemplateCallable]
         protected virtual double ReadDouble(long pos = -1)
         {
             var state = CurrentReader.SaveState();

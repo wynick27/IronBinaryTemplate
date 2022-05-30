@@ -620,6 +620,22 @@ namespace IronBinaryTemplate
             return new BinaryTemplateStringVariable(bytes, this, state);
         }
 
+        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        {
+            //Todo: chack initializer
+            object value = null;
+            if (Length.HasValue)
+                return new LocalVariable("",this,new sbyte[Length.Value]);
+            else
+            {
+                if (initizlizer == null)
+                    value = new BinaryTemplateString("");
+                else if (initizlizer is BinaryTemplateString)
+                    value = initizlizer;
+            }
+            return new LocalVariable("", this, value);
+        }
+
         public override string ToString()
         {
             if (!Length.HasValue)
@@ -903,15 +919,22 @@ namespace IronBinaryTemplate
         {
             Errors.AddRange(errors);
         }
-        public CompoundDefinition FindOrDefineType(TypeKind deftype, string text, bool isdefinition)
+        public TypeDefinition FindOrDefineType(TypeKind deftype, string text, bool isdefinition)
         {
             TypeDefinition type;
             if (text != null && TryGetType(text, out type))
             {
                 if (type.TypeKind != deftype || type.IsComplete && isdefinition)
                     throw new Exception($"Type {text} already defined.");
+                return type;
             }
-            return new CompoundDefinition(deftype, text);
+            else
+            {
+                var newtype = new CompoundDefinition(deftype, text);
+                Typedefs.Add(newtype);
+                return newtype;
+            }
+            
         }
 
         public bool TryGetType(string name, out TypeDefinition type)

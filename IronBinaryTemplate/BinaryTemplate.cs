@@ -18,8 +18,6 @@ namespace IronBinaryTemplate
 {
 
 
-
-
     public class BinaryTemplate
     {
         public Dictionary<string, ICallableFunction> BuiltinFunctions { get; }
@@ -290,6 +288,8 @@ namespace IronBinaryTemplate
                 var funccallexpr = new FunctionCallExpr(funcname, CurrentScope.LexicalScope, exprs);
                 if (Global.TryGetFunctions(funcname, out ICallableFunction value))
                     funccallexpr.Function = value;
+                else
+                    Console.WriteLine($"Function {funcname} not found.");
 
                 return funccallexpr;
             }
@@ -569,8 +569,8 @@ namespace IronBinaryTemplate
                 
             if (context.compoundStatement() != null)
             {
-                structdef = Global.FindOrDefineType(deftype, text, true);
-                Global.Typedefs.Add(structdef);
+                structdef = Global.FindOrDefineType(deftype, text, true) as CompoundDefinition;
+                
                 AnalysisScope scope = new AnalysisScope(this.CurrentScope, AnalysisScope.ScopeType.StructOrUnion, text, structdef);
                 PushScope(scope);
                 BlockExpression expr = VisitCompoundStatement(context.compoundStatement()) as BlockExpression;
@@ -582,7 +582,7 @@ namespace IronBinaryTemplate
             }
             else
             {
-                structdef = Global.FindOrDefineType(deftype, text, false);
+                structdef = Global.FindOrDefineType(deftype, text, false) as CompoundDefinition;
             }
             if (context.parameterTypeList() != null)
             {
@@ -611,12 +611,13 @@ namespace IronBinaryTemplate
                     AddError($"Inconsistency declaration for enum {enumname}", context.start);
 
             }
-            
+
             if (context.enumTypeSpecifier() != null)
             {
                 typedef = VisitEnumTypeSpecifier(context.enumTypeSpecifier());
             }
             EnumDefinition enumdef = new EnumDefinition(enumname, typedef?.ClrType);
+            Global.Typedefs.Add(enumdef);
             AnalysisScope scope = new AnalysisScope(CurrentScope, enumdef);
             PushScope(scope);
             List<Tuple<string,Expr>> enumeratorList = VisitEnumeratorList(context.enumeratorList());
@@ -1239,35 +1240,10 @@ namespace IronBinaryTemplate
         public static void Main(string[] args)
         {
 
-            var text = @"struct simple {int a;
-        if( a > 5 )
-            int b;
-        else
-            int c;
-    } a;
-
-    ";
-            text = "int a[4][3];";
-            string file;
             BinaryTemplate runtime = new BinaryTemplate();
             runtime.RegisterBuiltinFunctions();
-
-            //text = File.ReadAllText(@"C:\Users\wynic\Documents\SweetScape\010 Templates\Repository\EXE.bt");
-            
-            text = File.ReadAllText(@"C:\Users\wynic\Documents\SweetScape\010 Templates\Repository\WAV.bt");
-            text = @"enum {one,two} a:5;
-ushort b:3;
-ushort c:8;
-ushort d:9;
-ushort e:10;";
-            file = @"E:\Projects\HexEditor\IronBinaryTemplate\camera1.wav";
-            text = File.ReadAllText(@"C:\Users\wynic\Documents\SweetScape\010 Templates\Repository\ZIP.bt");
-            file = @"E:\Projects\HexEditor\IronBinaryTemplate\store-crawlers (4).zip";
-
-            var scope = runtime.RunTemplateString(text, file);
-
-            //text = File.ReadAllText(@"C:\Users\wynic\Documents\SweetScape\010 Templates\Repository\BMP.bt");
-            //var scope = runtime.RunTemplate(text, @"C:\Program Files\010 Editor\Data\Sample.bmp");
+            var scope = runtime.RunTemplateFile(@"C:\Users\wy\Documents\SweetScape\010 Templates\Repository\RAR.bt",
+               @"C:\Users\wy\AppData\Roaming\yuzu\yuzu.rar");
             var a = scope["b"];
         }
     }

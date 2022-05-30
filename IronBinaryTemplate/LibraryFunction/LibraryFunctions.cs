@@ -471,12 +471,25 @@ namespace IronBinaryTemplate
 
         //￼
 
-        //int Strchr(byte[] s, char c )
+        public static int Strchr(byte[] s, char c )
+        {
+            for (int i = 0;i < s.Length;i++)
+            {
+                if (s[i] == c)
+                    return i;
+                if (s[i] == '\0')
+                    return -1;
+            }
+            return -1;
+        }
         //Scans the string s for the first occurrence of the character c. Returns the index of the match, or -1 if no characters match. 
 
         //￼
-
-        //int Strcmp(byte[] s1, byte[] s2 )
+        [TemplateCallable]
+        public static int Strcmp(byte[] s1, byte[] s2 )
+        {
+            return 0;
+        }
         //Compares the one string to another. Returns a value less than zero if s1 is less than s2, zero if they are equal, or a value greater than zero if s1 is greater than s2. 
 
         //￼
@@ -551,7 +564,8 @@ namespace IronBinaryTemplate
 
         //￼
 
-        static int Strlen(byte[] s)
+        [TemplateCallable]
+        public static int Strlen(byte[] s)
         {
             for (int i=0;i<s.Length;i++)
             {
@@ -577,10 +591,11 @@ namespace IronBinaryTemplate
 
         //￼
 
-       // static int Strstr(byte[] s1, byte[] s2)
-       // {
-       //     return s1.
-       // }
+        [TemplateCallable]
+        public static int Strstr(byte[] s1, byte[] s2)
+        {
+            return 0;
+        }
         //Scans the string s1 for the first occurrence of s2. Returns the index of the first matching character, or -1 if no match is found. 
 
         //￼
@@ -718,27 +733,29 @@ namespace IronBinaryTemplate
         #endregion
 
         #region "Tool Functions"
-        static long  Checksum(int algorithm, long start = 0, long size = 0, long crcPolynomial = -1, long crcInitValue = -1)
+
+        [TemplateCallable]
+        public static long Checksum(int algorithm, long start = 0, long size = 0, long crcPolynomial = -1, long crcInitValue = -1)
         {
             throw new NotImplementedException();
         }
-//Runs a simple checksum on a file and returns the result as a int64.The algorithm can be one of the following constants: 
-//CHECKSUM_BYTE - Treats the file as a set of unsigned bytes
-//CHECKSUM_SHORT_LE - Treats the file as a set of unsigned little-endian shorts
-//CHECKSUM_SHORT_BE - Treats the file as a set of unsigned big-endian shorts
-//CHECKSUM_INT_LE - Treats the file as a set of unsigned little-endian ints
-//CHECKSUM_INT_BE - Treats the file as a set of unsigned big-endian ints
-//CHECKSUM_INT64_LE - Treats the file as a set of unsigned little-endian int64s
-//CHECKSUM_INT64_BE - Treats the file as a set of unsigned big-endian int64s
-//CHECKSUM_SUM8 - Same as CHECKSUM_BYTE except result output as 8-bits
-//CHECKSUM_SUM16 - Same as CHECKSUM_BYTE except result output as 16-bits
-//CHECKSUM_SUM32 - Same as CHECKSUM_BYTE except result output as 32-bits
-//CHECKSUM_SUM64 - Same as CHECKSUM_BYTE
-//CHECKSUM_CRC16
-//CHECKSUM_CRCCCITT
-//CHECKSUM_CRC32
-//CHECKSUM_ADLER32
-//If start and size are zero, the algorithm is run on the whole file.If they are not zero then the algorithm is run on size bytes starting at address start. See the ChecksumAlgBytes and ChecksumAlgStr functions to run more complex algorithms.crcPolynomial and crcInitValue can be used to set a custom polynomial and initial value for the CRC functions.A value of -1 for these parameters uses the default values as described in the Check Sum/Hash Algorithms topic.A negative number is returned on error.
+        //Runs a simple checksum on a file and returns the result as a int64.The algorithm can be one of the following constants: 
+        //CHECKSUM_BYTE - Treats the file as a set of unsigned bytes
+        //CHECKSUM_SHORT_LE - Treats the file as a set of unsigned little-endian shorts
+        //CHECKSUM_SHORT_BE - Treats the file as a set of unsigned big-endian shorts
+        //CHECKSUM_INT_LE - Treats the file as a set of unsigned little-endian ints
+        //CHECKSUM_INT_BE - Treats the file as a set of unsigned big-endian ints
+        //CHECKSUM_INT64_LE - Treats the file as a set of unsigned little-endian int64s
+        //CHECKSUM_INT64_BE - Treats the file as a set of unsigned big-endian int64s
+        //CHECKSUM_SUM8 - Same as CHECKSUM_BYTE except result output as 8-bits
+        //CHECKSUM_SUM16 - Same as CHECKSUM_BYTE except result output as 16-bits
+        //CHECKSUM_SUM32 - Same as CHECKSUM_BYTE except result output as 32-bits
+        //CHECKSUM_SUM64 - Same as CHECKSUM_BYTE
+        //CHECKSUM_CRC16
+        //CHECKSUM_CRCCCITT
+        //CHECKSUM_CRC32 = 0x200,
+        //CHECKSUM_ADLER32 = 0x400,
+        //If start and size are zero, the algorithm is run on the whole file.If they are not zero then the algorithm is run on size bytes starting at address start. See the ChecksumAlgBytes and ChecksumAlgStr functions to run more complex algorithms.crcPolynomial and crcInitValue can be used to set a custom polynomial and initial value for the CRC functions.A value of -1 for these parameters uses the default values as described in the Check Sum/Hash Algorithms topic.A negative number is returned on error.
 
         //￼
 
@@ -970,16 +987,27 @@ namespace IronBinaryTemplate
 
         //￼
 
-        //int64 FindFirst( 
-        //    <datatype> data,
-        //    int matchcase = true,
-        //    int wholeword = false,
-        //    int method = 0,
-        //    double tolerance = 0.0,
-        //    int dir = 1,
-        //    int64 start = 0,
-        //    int64 size = 0,
-        //    int wildcardMatchLength = 24)
+        class TFindResults
+        {
+            int count;
+            long[] start;
+            long[] length;
+        }
+
+        [TemplateCallable]
+        public static long FindFirst( 
+            BinaryTemplateVariable data,
+            bool matchcase = true,
+            bool wholeword = false,
+            int method = 0,
+            double tolerance = 0.0,
+            int dir = 1,
+            long start = 0,
+            long size = 0,
+            int wildcardMatchLength = 24)
+        {
+            return 0;
+        }
         //This function is identical to the FindAll function except that the return value is the position of the first occurrence of the target found.A negative number is returned if the value could not be found. 
         //Requires 010 Editor v4.0 or higher for the wildcardMatchLength parameter.
         //Requires 010 Editor v6.0 or higher for method= FINDMETHOD_REGEX.
