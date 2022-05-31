@@ -25,8 +25,11 @@ namespace IronBinaryTemplate
         public VariableCollection BuiltinConstants { get; }
 
         public Dictionary<string, TypeDefinition> BuiltinTypes { get; }
+        public List<string> IncludeDirs { get;  }
+
         public BinaryTemplate()
         {
+            IncludeDirs = new List<string>();
             BuiltinFunctions = new Dictionary<string, ICallableFunction>();
             BuiltinTypes = new Dictionary<string, TypeDefinition>();
             BuiltinTypes.Add("DOSTIME", BasicType.FromClrType(typeof(ushort)));
@@ -34,7 +37,8 @@ namespace IronBinaryTemplate
             BuiltinFunctions.Add("sizeof", new ExternalFunction(typeof(LibraryFunctions).GetMethod("sizeof")));
             BuiltinFunctions.Add("startof", new ExternalFunction(typeof(LibraryFunctions).GetMethod("startof")));
             BuiltinFunctions.Add("parentof", new ExternalFunction(typeof(LibraryFunctions).GetMethod("parentof")));
-            BuiltinFunctions.Add("exists", new ExistsFunction());
+            BuiltinFunctions.Add("exists", new TranslateNameToPathFunction(typeof(LibraryFunctions).GetMethod("exists")));
+            BuiltinFunctions.Add("function_exists", new TranslateNameToPathFunction(typeof(LibraryFunctions).GetMethod("function_exists")));
             BuiltinConstants = new VariableCollection(false);
             BuiltinConstants.Add(new ConstVariable("true", BasicType.FromString("int"), 1));
             BuiltinConstants.Add(new ConstVariable("false", BasicType.FromString("int"), 0));
@@ -74,43 +78,59 @@ namespace IronBinaryTemplate
 
             if (script.Errors.Count == 0)
             {
-                foreach (var defined in script.Functions.Values)
-                {
-                    defined.Compile();
-                }
                 var func = script.Compile();
                 func(context, scope);
             }
             
             return scope;
         }
-        public class SyntaxErrorListener : IAntlrErrorListener<IToken>
+        public class SyntaxErrorListener : IAntlrErrorListener<IToken>, IAntlrErrorListener<int>
         {
             public List<BinaryTemplateError> Errors = new List<BinaryTemplateError>();
 
             public void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] IToken offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e)
             {
                 Console.WriteLine($"line:{line} column:{charPositionInLine} {msg}");
+                Errors.Add(new SyntaxError(msg, new SourceLocation(offendingSymbol.StartIndex, line, charPositionInLine)));
+            }
+
+            public void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] int offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e)
+            {
+                Console.WriteLine($"line:{line} column:{charPositionInLine} {msg}");
+                Errors.Add(new SyntaxError(msg, new SourceLocation(offendingSymbol, line, charPositionInLine)));
             }
         }
 
-        public BinaryTemplateRootDefinition ParseTemplateCode(string templateCode, string filename = "")
+        public BinaryTemplateRootDefinition ParseTemplateCode(string templateCode, string filename = "<script>")
         {
             var textstream = new Antlr4.Runtime.AntlrInputStream(templateCode);
-            BinaryTemplateLexer lexer = new BinaryTemplateLexer(textstream);
-            BinaryTemplateParser parser = new BinaryTemplateParser(new Antlr4.Runtime.CommonTokenStream(lexer));
-            BinaryTemplateASTVisitor visitor = new BinaryTemplateASTVisitor(parser, this);
+
+            BinaryTemplatePreprocessingLexer lexer = new BinaryTemplatePreprocessingLexer(textstream);
             var errorListener = new SyntaxErrorListener();
-            parser.AddErrorListener(errorListener);
-            var tree = parser.compilationUnit();
-            if (errorListener.Errors.Count > 0)
-                return new BinaryTemplateRootDefinition(this, errorListener.Errors);
-            Console.WriteLine(tree.ToStringTree(parser));
-            
-            
-            var script = visitor.VisitCompilationUnit(tree);
-            script.Name = filename;
-            return script;
+            try
+            {
+                if (filename != "<script>")
+                    lexer.IncludeDirs.Add(Path.GetDirectoryName(filename));
+                lexer.IncludeDirs.AddRange(this.IncludeDirs);
+                lexer.AddErrorListener(errorListener);
+                BinaryTemplateParser parser = new BinaryTemplateParser(new Antlr4.Runtime.CommonTokenStream(lexer));
+                BinaryTemplateASTVisitor visitor = new BinaryTemplateASTVisitor(parser, this);
+                parser.AddErrorListener(errorListener);
+                var tree = parser.compilationUnit();
+                
+                var script = visitor.VisitCompilationUnit(tree);
+                script.Name = filename;
+                return script;
+            }
+            catch (PreprocessorError ex)
+            {
+                errorListener.Errors.Add(ex);
+            }
+            catch (SemanticError ex)
+            {
+                errorListener.Errors.Add(ex);
+            }
+            return new BinaryTemplateRootDefinition(this, errorListener.Errors);
         }
 
         public bool RegisterClrFunction(string name, Delegate d, bool overwrite = true)
@@ -1239,12 +1259,22 @@ namespace IronBinaryTemplate
     {
         public static void Main(string[] args)
         {
+            //foreach (var file in Directory.GetFiles(@"Tests","*.bt"))
+            //{
+            //    using var fs = File.OpenText(file);
+            //    BinaryTemplatePreprocessingLexer pplex = new BinaryTemplatePreprocessingLexer(new AntlrInputStream(fs));
+            //    pplex.IncludeDirs.Add(Path.GetDirectoryName(file));
+            //    var tokens = pplex.GetAllTokens().ToList();
+            //    StringBuilder sb = new StringBuilder();
+            //    tokens.ForEach(token => sb.Append(token.Text));
+            //    var text = sb.ToString();
+            //}
 
             BinaryTemplate runtime = new BinaryTemplate();
             runtime.RegisterBuiltinFunctions();
-            var scope = runtime.RunTemplateFile(@"C:\Users\wy\Documents\SweetScape\010 Templates\Repository\RAR.bt",
-               @"C:\Users\wy\AppData\Roaming\yuzu\yuzu.rar");
-            var a = scope["b"];
+            var scope = runtime.RunTemplateFile(@"ZIP.bt",
+               @"test.zip");
+
         }
     }
 }

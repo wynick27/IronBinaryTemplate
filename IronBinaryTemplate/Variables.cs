@@ -351,6 +351,13 @@ namespace IronBinaryTemplate
             return new BinaryTemplateMetaObject(this, parameter);
         }
 
+        public virtual ICallableFunction GetFunction(string name)
+        {
+            if (Parent != null)
+                return Parent.GetFunction(name);
+            return null;
+        }
+
         public object this[string name]
         {
             get => GetVariable(name).Value;
@@ -407,6 +414,17 @@ namespace IronBinaryTemplate
                 return true;
             BinaryTemplateRootDefinition rootdef = Type as BinaryTemplateRootDefinition;
             return rootdef.TryGetConsts(name, out var);
+        }
+
+
+        public override ICallableFunction GetFunction(string name)
+        {
+            BinaryTemplateRootDefinition rootdef = Type as BinaryTemplateRootDefinition;
+            if (rootdef.TryGetFunctions(name, out ICallableFunction func))
+                return func;
+            if (Parent != null)
+                return Parent.GetFunction(name);
+            return null;
         }
 
         public BinaryTemplateRootScope(BinaryTemplateContext context, BinaryTemplateRootDefinition type) : base(type, 0, false)

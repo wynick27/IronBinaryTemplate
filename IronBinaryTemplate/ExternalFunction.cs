@@ -175,9 +175,9 @@ namespace IronBinaryTemplate
         }
     }
 
-    public class ExistsFunction : ExternalFunction
+    public class TranslateNameToPathFunction : ExternalFunction
     {
-        public ExistsFunction() : base(typeof(LibraryFunctions).GetMethod("exists"))
+        public TranslateNameToPathFunction(MethodInfo method) : base(method)
         {
         }
 
@@ -190,7 +190,7 @@ namespace IronBinaryTemplate
             Expression arg = arguments[0];
             ParameterExpression param = scope.Scope as ParameterExpression;
             if (param == null || param.Type != typeof(BinaryTemplateScope))
-                throw new InvalidOperationException("exists() requires a scope parameter.");
+                throw new InvalidOperationException($"{Method.Name}() requires a scope parameter.");
             if (arg is ILValue lvalue)
             {
                 lvalue.AccessMode = ValueAccess.Wrapper;
@@ -198,7 +198,7 @@ namespace IronBinaryTemplate
                 arguments.Insert(0, param);
             }
             else
-                throw new InvalidOperationException("Arguments for exists() must be lvalue.");
+                throw new InvalidOperationException($"Arguments for {Method.Name}() must be lvalue.");
             return base.GetCallExpression(scope, arguments);
         }
     }

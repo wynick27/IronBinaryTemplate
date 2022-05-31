@@ -387,7 +387,7 @@ externalDeclaration
     //|   declaration
     |   functionDeclaration ';'
     |   statement
-    
+    |   linkDeclaration
     |   ';' // stray ;
     ;
 
@@ -395,6 +395,9 @@ functionDefinition
     :   functionDeclaration compoundStatement
     ;
 
+linkDeclaration
+    :   LinkDirective functionDeclaration*  EndLinkDirective
+    ;
 
 //Auto : 'auto';
 Break : 'break';
@@ -701,9 +704,28 @@ SChar
     |   '\\\r\n' // Added line
     ;
 
+fragment
+IncludePathLiteral
+    :    '"'  ~['\\\r\n]* '"'
+    |    '<' ~['\\\r\n]* '>'
+    ;
+
+
+LinkDirective
+    :   '#' Whitespace? 'link' Whitespace? IncludePathLiteral
+    ;
+
+EndlinkDirective
+    :   '#' Whitespace? 'endlink'
+    ;
+
+IncludeDirective
+    :   '#' Whitespace? 'include' Whitespace? IncludePathLiteral
+    ;
+    
 PreProcessorDirective
-    :   '#' Whitespace? 'define'
-        -> channel(2)
+    :   '#' Whitespace?
+        -> channel(HIDDEN)
     ;
 
 Whitespace
@@ -716,7 +738,7 @@ Newline
     :   (   '\r' '\n'?
         |   '\n'
         )
-        -> channel(2)
+        -> channel(HIDDEN)
     ;
 
 LineContinue

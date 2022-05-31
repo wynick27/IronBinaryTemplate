@@ -5,10 +5,12 @@ namespace IronBinaryTemplate
     public class BinaryTemplateError : Exception
     {
         public SourceLocation Location { get; }
-        public BinaryTemplateError(string message, SourceLocation location = default)
+        public bool IsWarning { get; }
+        public BinaryTemplateError(string message, SourceLocation location = default, bool iswarning = false)
             : base(message)
         {
-            Location = Location;
+            Location = location;
+            IsWarning = iswarning;
         }
     }
 
@@ -20,6 +22,17 @@ namespace IronBinaryTemplate
         public override string ToString()
         {
             return $"{Location.Line}:{Location.Column} Syntax Error: {Message}";
+        }
+    }
+
+    public class PreprocessorError : BinaryTemplateError
+    {
+        public PreprocessorError(string message, SourceLocation location = default, bool iswarning = false) : base(message, location, iswarning)
+        {
+        }
+        public override string ToString()
+        {
+            return $"{Location.Line}:{Location.Column} Preprocessor Error: {Message}";
         }
     }
 

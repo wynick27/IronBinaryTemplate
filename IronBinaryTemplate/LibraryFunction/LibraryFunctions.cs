@@ -74,6 +74,11 @@ namespace IronBinaryTemplate
             }
             return true;
         }
+
+        public static bool function_exists(BinaryTemplateScope scope, string name)
+        {
+            return scope.GetFunction(name) == null;
+        }
         #endregion
 
         #region "Interface Functions"

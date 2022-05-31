@@ -843,6 +843,7 @@ namespace IronBinaryTemplate
 
             var initexprs = new List<Expression>();
             var updateexprs = new List<Expression>();
+            var tempvars = new List<ParameterExpression>();
 
             if ((arguments == null ? 0 : arguments.Count) != parameters.Count)
                 throw new InvalidOperationException($"Function {Name} called with wrong numbers of arguments.");
@@ -857,9 +858,11 @@ namespace IronBinaryTemplate
                         {
                             //lvalue.AccessMode = ValueAccess.Reference;
                             var tempVar = Expression.Parameter(param.Type);
-                            initexprs.Add(tempVar);
+                            tempvars.Add(tempVar);
                             initexprs.Add(Expression.Assign(tempVar, RuntimeHelpers.DynamicConvert(arguments[i], param.Type)));
                             updateexprs.Add(lvalue.GetAssignmentExpression(tempVar));
+                            converted.Add(tempVar);
+                            continue;
                         }
                         else
                         {
@@ -874,18 +877,24 @@ namespace IronBinaryTemplate
                     converted.Add(arguments[i]);
                 }
             }
-            var invokeexpr = Expression.Invoke(LambdaExpression, arguments);
+            var invokeexpr = Expression.Invoke(LambdaExpression, converted);
             if (initexprs.Count > 0)
             {
-                var tempVar = Expression.Parameter(invokeexpr.Type);
-                initexprs.Add(invokeexpr);
-                initexprs.Add(Expression.Assign(tempVar, tempVar));
+                if (invokeexpr.Type != typeof(void))
+                {
+var tempVar = Expression.Parameter(invokeexpr.Type);
+                
+                    tempvars.Add(tempVar);
+                    initexprs.Add(Expression.Assign(tempVar, invokeexpr));
                 updateexprs.Add(tempVar);
+                } else
+                    initexprs.Add(invokeexpr);
+
                 initexprs.AddRange(updateexprs);
 
-                return Expression.Block(invokeexpr.Type, initexprs);
+                return Expression.Block(invokeexpr.Type,tempvars, initexprs);
             }
-            return Expression.Invoke(LambdaExpression, arguments);
+            return Expression.Invoke(LambdaExpression, converted);
         }
 
         public object Call(params object[] args)
@@ -905,6 +914,8 @@ namespace IronBinaryTemplate
 
         public BinaryTemplate Runtime { get; }
         public List<BinaryTemplateError> Errors { get; internal set; }
+
+        public Action<BinaryTemplateContext, BinaryTemplateScope> CompiledFunction { get; private set; }
 
         public BinaryTemplateRootDefinition(BinaryTemplate runtime) : base()
         {
@@ -959,9 +970,17 @@ namespace IronBinaryTemplate
 
         public new Action<BinaryTemplateContext, BinaryTemplateScope> Compile()
         {
-            
+            if (CompiledFunction != null)
+                return CompiledFunction;
             var lambda = Expression.Lambda<Action<BinaryTemplateContext, BinaryTemplateScope>>(Expression.Block(Statements), Parameters);
-            return lambda.Compile();
+
+            CompiledFunction = lambda.Compile();
+            return CompiledFunction;
+        }
+
+        public void Execute(BinaryTemplateContext context, BinaryTemplateScope scope)
+        {
+            Compile()(context, scope);
         }
 
         public BinaryTemplateVariable GetVariable(string name)
