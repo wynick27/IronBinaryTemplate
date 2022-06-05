@@ -7,6 +7,11 @@ using System.Reflection;
 namespace IronBinaryTemplate
 {
 
+    public class TemplateCallableAttribute : Attribute
+    {
+
+    }
+
     public interface ICallableFunction
     {
         Expression GetCallExpression(ILexicalScope scope, List<Expression> arguments);
@@ -22,8 +27,8 @@ namespace IronBinaryTemplate
             bool isparamarray = parameters.Count == 0 ? false : parameters[^1].IsDefined(typeof(ParamArrayAttribute), false);
 
 
-            if ((arguments == null ? 0 : arguments.Count) > parameters.Count && !isparamarray)
-                throw new InvalidOperationException($"Function {name} called with too many arguments.");
+            //if ((arguments == null ? 0 : arguments.Count) > parameters.Count && !isparamarray)
+            //    throw new InvalidOperationException($"Function {name} called with too many arguments.");
             if (arguments != null)
             {
                 int j = 0;
@@ -31,8 +36,12 @@ namespace IronBinaryTemplate
 
                 for (int i = 0; i < arguments.Count; i++)
                 {
-                    if (j >= parameters.Count)
+                    bool paramarrayparam = false;
+                    if (j >= parameters.Count || j == parameters.Count - 1 && isparamarray)
+                    {
                         j = parameters.Count - 1;
+                        paramarrayparam = true;
+                    }
                     var param = parameters[j];
                     if (param.ParameterType.IsAssignableFrom(typeof(BinaryTemplateContext)))
                     {
@@ -42,7 +51,7 @@ namespace IronBinaryTemplate
                     }
                     else if (param.ParameterType == typeof(BinaryTemplateScope))
                     {
-                        converted.Add(scope.Scope);
+                        converted.Add(scope.ScopeParam);
                         j++;
                         continue;
                     }
@@ -52,12 +61,18 @@ namespace IronBinaryTemplate
                         {
                             lvalue.AccessMode = ValueAccess.Wrapper;
                         }
+                        else if (arguments[i] is FunctionCallExpr funccall && funccall.Name == "parentof")
+                        {
+
+                        }
                         else
                         {
                             throw new ArgumentException($"Arguments {param.Name} must be lvalue.");
                         }
+                        converted.Add(RuntimeHelpers.DynamicConvert(arguments[i], param.ParameterType));
+                        continue;
                     }
-                    else if (param.ParameterType.IsByRef)
+                    else if (param.ParameterType.IsByRef && param.ParameterType.IsValueType)
                     {
                         if (arguments[i] is ILValue lvalue)
                         {
@@ -74,44 +89,7 @@ namespace IronBinaryTemplate
             }
             return converted;
         }
-
-        public static List<Expression> ConvertArguments(ILexicalScope scope, string name, IList<ParameterExpression> parameters, List<Expression> arguments)
-        {
-            var converted = new List<Expression>();
-
-            if ((arguments == null ? 0 : arguments.Count) != parameters.Count)
-                throw new InvalidOperationException($"Function {name} called with wrong numbers of arguments.");
-            if (arguments != null)
-            {
-                int j = 0;
-
-
-                for (int i = 0; i < arguments.Count; i++,j++)
-                {
-                    var param = parameters[j];
-                    if (param.IsByRef)
-                    {
-                        if (arguments[i] is ILValue lvalue)
-                        {
-                            lvalue.AccessMode = ValueAccess.Reference;
-                        }
-                        else
-                        {
-                            throw new ArgumentException($"Arguments {param.Name} must be lvalue.");
-                        }
-                    }
-                    else if (!param.Type.IsAssignableFrom(arguments[i].Type))
-                    {
-                        converted.Add(RuntimeHelpers.DynamicConvert(arguments[i],param.Type));
-                        continue;
-                    }
-                    converted.Add(arguments[i]);
-                }
-            }
-            return converted;
-        }
     }
-
     public abstract class ExternalFunctionBase : ICallableFunction
     {
         public abstract Expression GetCallExpression(ILexicalScope scope, List<Expression> arguments);
@@ -188,7 +166,7 @@ namespace IronBinaryTemplate
                 throw new InvalidOperationException($"Function called with too many arguments.");
             }
             Expression arg = arguments[0];
-            ParameterExpression param = scope.Scope as ParameterExpression;
+            ParameterExpression param = scope.ScopeParam as ParameterExpression;
             if (param == null || param.Type != typeof(BinaryTemplateScope))
                 throw new InvalidOperationException($"{Method.Name}() requires a scope parameter.");
             if (arg is ILValue lvalue)
@@ -203,5 +181,26 @@ namespace IronBinaryTemplate
         }
     }
 
+    public class NativeLibrary
+    {
+
+    }
+
+    public class NativeDelegate : ExternalDelegate
+    {
+        public NativeLibrary NativeLibrary { get; set; }
+        public NativeDelegate(Delegate d)
+            : base(d)
+        {
+            Delegate = d;
+        }
+
+        public override Expression GetCallExpression(ILexicalScope scope, List<Expression> arguments)
+        {
+            var converted = ConvertArguments(Delegate.Method, scope, arguments, false);
+            converted.Insert(0, Expression.Constant(Delegate));
+            return Expression.Dynamic(new BTInvokeBinder(new CallInfo(converted.Count)), typeof(object), converted);
+        }
+    }
 
 }

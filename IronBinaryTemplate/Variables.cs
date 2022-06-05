@@ -20,13 +20,13 @@ namespace IronBinaryTemplate
         public abstract long? Start { get; }
 
         public abstract long? Size { get; }
+        public virtual long? BitSize => Size.HasValue ? Size.Value * 8 : null;
         public abstract object Value { get; set; }
 
 
         public virtual BinaryTemplateContext Context { get => Parent?.Context; }
         public BinaryTemplateScope Parent { get; internal set; }
-
-
+        public CustomAttributeCollection CustomAttributes { get; internal set; }
     }
 
     /// <summary>
@@ -37,6 +37,8 @@ namespace IronBinaryTemplate
         private BinaryTemplateReaderState state;
         public override long? Start => state?.Position;
         public override long? Size => Type?.Size;
+
+        public override long? BitSize => Type?.BitSize;
 
         BinaryTemplateContext _context;
         public override BinaryTemplateContext Context { get => _context; }
@@ -204,7 +206,9 @@ namespace IronBinaryTemplate
         public void AddVariable(BinaryTemplateVariable value)
         {
             value.Parent = this;
+            value.Name = $"{this.Name}[{Variables.Count}]";
             Variables.Add(value);
+            
             this._size = _size + (long)value.Size;
         }
 
@@ -217,14 +221,14 @@ namespace IronBinaryTemplate
     /// <summary>
     /// Creates array element lazyily when accessed through index. Used with fixed size structure array or optimize = true.
     /// </summary>
-    public class BinaryTemplateLazyArray : BinaryTemplateScope, IBinaryTemplateArray
+    public class BinaryTemplateLazyArray : BinaryTemplateVariable, IBinaryTemplateArray
     {
 
         long _elemSize = 0;
         int _length = 0;
         long _start;
         BinaryTemplateVariable _cache = null;
-        int _cachindex = 0;
+        int _cachindex = -1;
         object[] _arguments = null;
         protected BinaryTemplateContext _context;
 
@@ -232,18 +236,27 @@ namespace IronBinaryTemplate
 
         public int Length => _length;
 
-        public BinaryTemplateLazyArray(BinaryTemplateContext context, TypeDefinition type, long start, int length) : base(type, start, false)
+        public override long? Start => _start;
+
+        public override object Value { get => this; set => throw new NotImplementedException(); }
+
+        public BinaryTemplateLazyArray(BinaryTemplateContext context, TypeDefinition type, long start, int length, object[] args)
         {
             Type = type;
             _start = start;
             _length = length;
             _context = context;
+            _arguments = args;
             if (type.Size.HasValue)
+            {
                 _elemSize = type.Size.Value / length;
+                context.MapType(type);
+            }
             else
             {
-                _cache = Type.CreateInstance(_context, this, _arguments);
+                _cache = (Type as ArrayDefinition).Element.CreateInstance(_context, this.Parent, _arguments);
                 _elemSize = _cache.Size.Value;
+                context.SkipBytes(_cache.Size.Value *  (length-1));
             }
         }
 
@@ -258,18 +271,15 @@ namespace IronBinaryTemplate
                 throw new IndexOutOfRangeException();
             long pos = Context.Position;
             Context.Position = _start + index * _elemSize;
-            var value = Type.CreateInstance(_context, this, _arguments);
-            value.Parent = this;
-
+            var value = (Type as ArrayDefinition).Element.CreateInstance(_context, this.Parent, _arguments);
+            value.Name = $"{this.Name}[{index}]";
+            value.Parent = this.Parent;
+            _cache = value;
             Context.Position = pos;
             
             return value;
         }
-        public virtual object this[int index]
-        {
-            get => GetVariable(index);
-            set => GetVariable(index).Value = value;
-        }
+
 
     }
 
@@ -284,8 +294,12 @@ namespace IronBinaryTemplate
 
         protected long _size;
 
+        protected long _bitSize;
+
         protected long _start;
-        public override long? Size => _size;
+        public override long? Size => _size + _bitSize/8 + ((_bitSize % 8 == 0) ? 0 : 1);
+
+        public override long? BitSize => _size * 8 + _bitSize;
 
         public override long? Start => _start;
 
@@ -298,6 +312,38 @@ namespace IronBinaryTemplate
             _start = start;
             Variables = new VariableCollection();
         }
+
+        string _newvarname;
+        BinaryTemplateVariable _newvar;
+
+        internal void BeginNewVariable(string name)
+        {
+            _newvarname = name;
+            if (_isUnion)
+            {
+                Context.Position = Start.Value;
+            }
+        }
+
+        internal void BeginNewScope(BinaryTemplateVariable value)
+        {
+            _newvar = value;
+            _newvar.Name = _newvarname;
+            _newvar.Parent = this;
+
+        }
+
+        internal void EndNewVariable(BinaryTemplateVariable value)
+        {
+            value.Name = _newvarname;
+            SetVariable(value);
+            _newvarname = null;
+            _newvar = null;
+            if (_isUnion)
+            {
+                Context.Position = Start.Value + _size;
+            }
+        }
         public virtual void SetVariable(BinaryTemplateVariable value)
         {
             value.Parent = this;
@@ -307,11 +353,16 @@ namespace IronBinaryTemplate
                 if (_isUnion)
                 {
                     this._size = Math.Max(_size, (long)value.Size);
-                    Context.Position = Start.Value;
                 }
                     
                 else
-                    this._size = _size + (long)value.Size;
+                {
+                    if (value.BitSize != value.Size * 8)
+                        this._bitSize = _bitSize + (long)value.BitSize;
+                    else
+                        this._size = _size + (long)value.Size;
+                }
+                    
                 
             } else
             {
@@ -331,6 +382,11 @@ namespace IronBinaryTemplate
                 var = this;
                 return true;
             }
+            if (_newvar != null && name == _newvar.Name)
+            {
+                var = _newvar;
+                return true;
+            }
             if (Variables.TryGetValue(name, out var))
                 return true;
             else if (Parent != null)
@@ -340,10 +396,29 @@ namespace IronBinaryTemplate
 
         public virtual BinaryTemplateVariable GetVariable(string name)
         {
-            if (!TryGetVariable(name,out BinaryTemplateVariable var))
-                throw new MemberAccessException(name);
-            Console.WriteLine($"GetVariable {name} = {var.Value}");
+            TryGetVariable(name, out BinaryTemplateVariable var);
             return var;
+        }
+
+        protected object GetVariableValue(string name)
+        {
+            if (!TryGetVariable(name, out BinaryTemplateVariable var))
+                throw new MemberAccessException(name);
+            //Console.WriteLine($"{Context.Position} GetVariable {name} = {var.Value}");
+
+            if (var is IBinaryTemplateScope || var is IBinaryTemplateArray)
+                return var;
+            else
+                return var.Value;
+        }
+
+
+        private void SetVariableValue(string name, object value)
+        {
+            if (!TryGetVariable(name, out BinaryTemplateVariable var))
+                throw new MemberAccessException(name);
+           // Console.WriteLine($"{Context.Position} SetVariable {name} = {value}");
+            var.Value = value;
         }
 
         public DynamicMetaObject GetMetaObject(Expression parameter)
@@ -360,8 +435,8 @@ namespace IronBinaryTemplate
 
         public object this[string name]
         {
-            get => GetVariable(name).Value;
-            set => GetVariable(name).Value = value;
+            get => GetVariableValue(name);
+            set => SetVariableValue(name,value);
         }
 
     }
@@ -387,7 +462,7 @@ namespace IronBinaryTemplate
         public override DynamicMetaObject BindGetMember(GetMemberBinder binder)
         {
             Expression target;
-            if ((base.Value as BinaryTemplateScope).Variables.Contains(binder.Name))
+            if ((base.Value as BinaryTemplateScope).TryGetVariable(binder.Name,out BinaryTemplateVariable variable))
                 target = Expression.MakeIndex(Expression.Convert(this.Expression, typeof(BinaryTemplateScope)), indexer, new[] { Expression.Constant(binder.Name) });
             else
                 target = Expression.Throw(Expression.Constant(new ArgumentException($"Cannot find member {binder.Name}.")));
@@ -402,7 +477,7 @@ namespace IronBinaryTemplate
 
     public class BinaryTemplateRootScope : BinaryTemplateScope
     {
-        public bool HasErrors { get; }
+        public bool HasErrors => Errors.Count == 0;
         public List<Exception> Errors { get; }
         
         public override BinaryTemplateContext Context { get; }
@@ -431,6 +506,28 @@ namespace IronBinaryTemplate
         {
             Type = type;
             Context = context;
+            Errors = new List<Exception>();
+        }
+    }
+
+
+    public class BinaryTemplateVariableScope : IBinaryTemplateScope
+    {
+        public BinaryTemplateVariable Variable { get; }
+        public Dictionary<string,object> Arguments { get; }
+        public BinaryTemplateVariableScope(BinaryTemplateVariable var)
+        {
+            Variable = var;
+            Arguments = new Dictionary<string, object>();
+        }
+        public BinaryTemplateVariable GetVariable(string name)
+        {
+            if (name == "this")
+                return Variable;
+            else if (Arguments.TryGetValue(name, out object obj))
+                return new LocalVariable(name, TypeDefinition.FromClrType(obj.GetType()), obj);
+            else
+                return Variable.Parent.GetVariable(name);
         }
     }
 
@@ -520,6 +617,11 @@ namespace IronBinaryTemplate
         public static implicit operator sbyte[](BinaryTemplateString str)
         {
             return (object)str.data as sbyte[];
+        }
+
+        public static implicit operator string(BinaryTemplateString str)
+        {
+            return str.ToString();
         }
 
         public BinaryTemplateString(byte[] data, Encoding encoding = null)

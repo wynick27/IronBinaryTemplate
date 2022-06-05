@@ -38,17 +38,19 @@ namespace IronBinaryTemplate
         Struct,
         Union,
         Enum,
-        Function
+        Function,
+        TypeAlias,
+        UserDefined,
     }
 
-    public abstract class TypeDefinition :IEquatable<TypeDefinition>
+    public abstract class TypeDefinition : IEquatable<TypeDefinition>
     {
 
-        public TypeDefinition(string name ="", TypeKind type = TypeKind.Void)
+        public TypeDefinition(string name = "", TypeKind type = TypeKind.Void)
         {
             Name = name;
             TypeKind = type;
-            
+            IsComplete = true;
         }
         public virtual bool IsFixedSize => Size.HasValue;
 
@@ -57,19 +59,25 @@ namespace IronBinaryTemplate
         public virtual int? Size { get; }
 
         public bool IsBitfield { get => (Size.HasValue && BitSize.HasValue) ? BitSize.Value != Size.Value * 8 : false; }
-        public bool IsComplete { get; internal set; }
+        public virtual bool IsComplete { get; internal set; }
 
         public TypeKind TypeKind { get; protected set; }
         public string Name { get; set; }
         public virtual Type ClrType { get; internal set; }
 
         public virtual Type LocalClrType { get => ClrType; }
-        public virtual bool IsBasicType { get; }
+        public virtual bool IsBasicType => false;
         public virtual bool IsStructOrUnion => false;
+
+        public virtual TypeDefinition UnderlyingType { get => this;}
+
+        public List<VariableDeclaration> References { get; protected set; }
 
         public virtual bool IsEnum => false;
 
         public CompoundDefinition Parent;
+
+        public SourceSpan SourceLocation;
 
         public static bool operator ==(TypeDefinition t1, TypeDefinition t2)
         {
@@ -107,6 +115,7 @@ namespace IronBinaryTemplate
 
         protected static Dictionary<string, TypeDefinition> typenamemapping = new Dictionary<string, TypeDefinition>()
         {
+            { "void", VoidType.Instance },
             { "char", BasicType.FromClrType(typeof(sbyte)) },
             { "uchar", BasicType.FromClrType(typeof(byte)) },
             { "short", BasicType.FromClrType(typeof(short)) },
@@ -128,7 +137,6 @@ namespace IronBinaryTemplate
             
             
             var typealiasmap = new (string, Type)[] { 
-                ("void", typeof(void)),
                 ("byte", typeof(sbyte)) ,
                 ("ubyte", typeof(byte)) ,
                 ("int16", typeof(short)) ,
@@ -232,6 +240,11 @@ namespace IronBinaryTemplate
             return Name;
         }
 
+        public virtual string ToString(string varname)
+        {
+            return $"{Name} {varname}";
+        }
+
         public virtual bool Equals(TypeDefinition other)
         {
             if (other == null)
@@ -257,7 +270,7 @@ namespace IronBinaryTemplate
         public static VoidType Instance = new VoidType();
         private VoidType()
         {
-
+            Name = "void";
         }
         public override Type ClrType { get => typeof(void); internal set { } }
         public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
@@ -383,6 +396,8 @@ namespace IronBinaryTemplate
             _bitSize = _size * 8;
             Values = new VariableCollection();
             ScopeParam = Expression.Parameter(typeof(IBinaryTemplateScope));
+            References = new List<VariableDeclaration>();
+            IsComplete = false;
         }
 
         public EnumDefinition(EnumDefinition enumdef, int bitsize)
@@ -394,6 +409,8 @@ namespace IronBinaryTemplate
             _bitSize = bitsize;
             Values = enumdef.Values;
             ScopeParam = enumdef.ScopeParam;
+            References = enumdef.References;
+            IsComplete = true;
         }
 
         public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
@@ -413,6 +430,12 @@ namespace IronBinaryTemplate
         public override string ToString()
         {
             return $"enum {Name}";
+        }
+
+
+        public override string ToString(string varname)
+        {
+            return $"enum {Name} {varname}";
         }
 
         public override TypeDefinition GetBitfieldType(int bitsize)
@@ -441,8 +464,6 @@ namespace IronBinaryTemplate
 
         public ParameterExpression ScopeParam { get; } 
 
-        public Expression Scope => ScopeParam;
-
         public Expression Context => null;
 
         public ParameterExpression GetParameter(string name)
@@ -460,7 +481,7 @@ namespace IronBinaryTemplate
 
     public class TypeAliasDefinition : TypeDefinition
     {
-        public TypeDefinition UnderlyingType { get; }
+        public override TypeDefinition UnderlyingType { get; }
 
         //  public override bool IsFixedSize => Length != 0 && Element.IsFixedSize;
         public override int? Size => UnderlyingType.Size;
@@ -476,6 +497,11 @@ namespace IronBinaryTemplate
         {
             Name = name;
             UnderlyingType = type;
+            TypeKind = TypeKind.TypeAlias;
+            References = new List<VariableDeclaration>();
+            while (UnderlyingType is TypeAliasDefinition typealias)
+                UnderlyingType = typealias.UnderlyingType;
+            IsComplete = true;
         }
 
         public override TypeDefinition GetArrayType(int? length = null)
@@ -494,11 +520,6 @@ namespace IronBinaryTemplate
         public override Type LocalClrType => UnderlyingType.LocalClrType;
 
         public override int RequiredArguments => UnderlyingType.RequiredArguments;
-
-        public override string ToString()
-        {
-            return Name;
-        }
 
         public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
         {
@@ -533,18 +554,30 @@ namespace IronBinaryTemplate
             TypeKind = TypeKind.Array;
             Length = length;
             ClrType = typeof(BinaryTemplateArray);
+            References = elemtype.References;
         }
 
         public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
         {
-            BinaryTemplateArray array = new BinaryTemplateArray(context,this,context.SaveState());
+            
             if (!Length.HasValue)
                 throw new InvalidOperationException("Incomplete type. Cannot create array of undefined size.");
-            for (int i = 0; i < Length; i++)
+            if (Element.Size.HasValue)
             {
-                array.AddVariable(Element.CreateInstance(context, scope, args));
+                BinaryTemplateLazyArray lazyarray = new BinaryTemplateLazyArray(context, this, context.Position, Length.Value, args);
+                return lazyarray;
             }
-            return array;
+            else
+            {
+                BinaryTemplateArray array = new BinaryTemplateArray(context, this, context.SaveState());
+                for (int i = 0; i < Length; i++)
+                {
+                    array.AddVariable(Element.CreateInstance(context, scope, args));
+                }
+                return array;
+            }
+            
+            
         }
 
         public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
@@ -564,6 +597,11 @@ namespace IronBinaryTemplate
 
         }
 
+        public override string ToString(string varname)
+        {
+            return $"{Element.ToString(varname)}[{Length}]";
+
+        }
 
         public override bool Equals(TypeDefinition other)
         {
@@ -588,8 +626,7 @@ namespace IronBinaryTemplate
             if (Length > 256)
             {
                 
-                var array =  new BinaryTemplateLazyArray(context, this, context.Position, Length.Value);
-                context.Position += array.Size.Value;
+                var array =  new BinaryTemplateLazyArray(context, this, context.Position, Length.Value, args);
                 return array;
 
             }
@@ -647,7 +684,7 @@ namespace IronBinaryTemplate
 
     public class WCharArrayDefinition : ArrayDefinition
     {
-        public WCharArrayDefinition(int? length) : base(BasicType.FromTypeRank(BasicTypeRank.WChar), length)
+        public WCharArrayDefinition(int? length) : base(BasicType.FromClrType(typeof(char)), length)
         {
         }
 
@@ -680,15 +717,17 @@ namespace IronBinaryTemplate
 
         public Expression Context => Parameters[0];
 
-        public Expression Scope => Parameters[1];
+        public ParameterExpression ScopeParam => Parameters[1];
 
         public List<Expression> Statements { get; }
 
         Delegate CompiledFunction;
 
         protected int _size;
+        protected int _bitSize;
+        public override int? BitSize => _bitSize + _size * 8;
 
-        public override int? Size => IsSimple ? (int?)_size : null;
+        public override int? Size => IsSimple ? _size + _bitSize / 8 + (_bitSize % 8 == 0 ? 0 : 1) : null;
 
         public override int RequiredArguments => Parameters.Count - 2;
 
@@ -702,15 +741,29 @@ namespace IronBinaryTemplate
             if (expr is VariableDeclaration)
             {
                 var var = expr as VariableDeclaration;
-                if (Children.Contains(var.Name) || !var.IsFixedSize)
+                if (var.Name != null && Children.Contains(var.Name) || !var.IsFixedSize)
                 {
                     IsSimple = false;
                     return;
                 }
                 Children.Add(var);
-                if (var.Size.HasValue)
-                    _size += var.Size.Value;
-                var.Parent = this;
+                if (TypeKind == TypeKind.Union)
+                {
+                    if (var.IsBitfield)
+                        _size = Math.Max(_bitSize, var.BitSize.Value);
+                    else
+                        _size = Math.Max(_size, var.Size.Value);
+
+                    var.Parent = this;
+                } else
+                {
+                    if (var.IsBitfield)
+                        _bitSize = _bitSize + var.BitSize.Value;
+                    else
+                        _size += var.Size.Value;
+                    var.Parent = this;
+                }
+                
             }
             else if (expr is BlockExpression)
             {
@@ -742,6 +795,8 @@ namespace IronBinaryTemplate
             Parameters = new List<ParameterExpression>();
             Parameters.Add(Expression.Parameter(typeof(BinaryTemplateContext), "$context"));
             Parameters.Add(Expression.Parameter(typeof(BinaryTemplateScope), "$scope"));
+            References = new List<VariableDeclaration>();
+            IsComplete = false;
         }
 
         public Delegate Compile()
@@ -751,13 +806,19 @@ namespace IronBinaryTemplate
             return lambda.Compile();
         }
 
+
+
+
         public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
         {
             if (CompiledFunction == null)
                 CompiledFunction = Compile();
             BinaryTemplateScope childscope = new BinaryTemplateScope(this, context.Position, TypeKind == TypeKind.Union);
-            childscope.Parent = scope;
-            CompiledFunction.DynamicInvoke(new object[] { context, childscope }.Concat(args).ToArray());
+            scope.BeginNewScope(childscope);
+            
+            var objects = new object[] { context, childscope }.Concat(args).ToArray();
+            CompiledFunction.DynamicInvoke(objects);
+            Array.Copy(objects, 2, args, 0, args.Length);
             return childscope;
         }
 
@@ -773,10 +834,17 @@ namespace IronBinaryTemplate
 
         }
 
+        public override string ToString(string varname)
+        {
+            string typekind = TypeKind == TypeKind.Struct ? "struct" : "union";
+            return $"{typekind} {Name} {varname}";
+
+        }
+
         public ParameterExpression GetParameter(string name)
         {
             if (name == "this")
-                return Scope as ParameterExpression;
+                return ScopeParam as ParameterExpression;
             else
             {
                 var result = Parameters.Find(param => param.Name == name);
@@ -799,6 +867,8 @@ namespace IronBinaryTemplate
         public TypeDefinition ReturnType { get; }
         public List<VariableDeclaration> ParameterDeclaration { get; }
 
+        public List<FunctionCallExpr> References { get; }
+
         Type ICallableFunction.ReturnType => ReturnType == null ? typeof(void) : ReturnType.ClrType;
 
 
@@ -817,6 +887,12 @@ namespace IronBinaryTemplate
             Name = funcname;
             ParameterDeclaration = new List<VariableDeclaration>(variables);
             ReturnType = returntype;
+            References = new List<FunctionCallExpr>();
+            
+        }
+
+        internal void CreateLambdaExpression()
+        {
             foreach (var decl in ParameterDeclaration)
             {
                 var type = decl.TypeDefinition.ClrType;
@@ -824,77 +900,22 @@ namespace IronBinaryTemplate
                     type = type.MakeByRefType();
                 Parameters.Add(Expression.Parameter(type, decl.Name));
             }
-        }
-
-        void CreateLambdaExpression()
-        {
             LambdaExpression = Expression.Lambda(Body, Parameters);
         }
+
+
 
         public Expression GetCallExpression(ILexicalScope scope, List<Expression> callarguments)
         {
             if (LambdaExpression == null)
                 CreateLambdaExpression();
-            var arguments = new List<Expression>() { scope.Context, scope.Scope };
+            var arguments = new List<Expression>() { scope.Context, scope.ScopeParam };
             arguments.AddRange(callarguments);
 
-            var converted = new List<Expression>();
-            var parameters = LambdaExpression.Parameters;
-
-            var initexprs = new List<Expression>();
-            var updateexprs = new List<Expression>();
-            var tempvars = new List<ParameterExpression>();
-
-            if ((arguments == null ? 0 : arguments.Count) != parameters.Count)
+            if ((arguments == null ? 0 : arguments.Count) != LambdaExpression.Parameters.Count)
                 throw new InvalidOperationException($"Function {Name} called with wrong numbers of arguments.");
-            if (arguments != null)
-            {
-                for (int i = 0 ; i < arguments.Count; i++)
-                {
-                    var param = parameters[i];
-                    if (param.IsByRef)
-                    {
-                        if (arguments[i] is ILValue lvalue)
-                        {
-                            //lvalue.AccessMode = ValueAccess.Reference;
-                            var tempVar = Expression.Parameter(param.Type);
-                            tempvars.Add(tempVar);
-                            initexprs.Add(Expression.Assign(tempVar, RuntimeHelpers.DynamicConvert(arguments[i], param.Type)));
-                            updateexprs.Add(lvalue.GetAssignmentExpression(tempVar));
-                            converted.Add(tempVar);
-                            continue;
-                        }
-                        else
-                        {
-                            throw new ArgumentException($"Arguments {param.Name} must be lvalue.");
-                        }
-                    }
-                    else if (!param.Type.IsAssignableFrom(arguments[i].Type))
-                    {
-                        converted.Add(RuntimeHelpers.DynamicConvert(arguments[i], param.Type));
-                        continue;
-                    }
-                    converted.Add(arguments[i]);
-                }
-            }
-            var invokeexpr = Expression.Invoke(LambdaExpression, converted);
-            if (initexprs.Count > 0)
-            {
-                if (invokeexpr.Type != typeof(void))
-                {
-var tempVar = Expression.Parameter(invokeexpr.Type);
-                
-                    tempvars.Add(tempVar);
-                    initexprs.Add(Expression.Assign(tempVar, invokeexpr));
-                updateexprs.Add(tempVar);
-                } else
-                    initexprs.Add(invokeexpr);
 
-                initexprs.AddRange(updateexprs);
-
-                return Expression.Block(invokeexpr.Type,tempvars, initexprs);
-            }
-            return Expression.Invoke(LambdaExpression, converted);
+            return RuntimeHelpers.GetArgumentConvertedExpression(LambdaExpression.Parameters, arguments, converted => Expression.Invoke(LambdaExpression, converted));
         }
 
         public object Call(params object[] args)
@@ -904,10 +925,16 @@ var tempVar = Expression.Parameter(invokeexpr.Type);
             return CompiledFunction.DynamicInvoke(args);
         }
 
+
+        public override string ToString()
+        {
+            var paramlist = string.Join(", ", ParameterDeclaration.Select(var => var.ToString()));
+            return $"{ReturnType} {Name}({paramlist})";
+        }
     }
 
-    public class BinaryTemplateRootDefinition : CompoundDefinition, IBinaryTemplateScope
-    {
+        public class BinaryTemplateRootDefinition : CompoundDefinition, IBinaryTemplateScope
+        {
         public Dictionary<string, FunctionDefinition> Functions { get; }
         public TypeDefinitionCollection Typedefs { get; }
         public VariableCollection EnumConsts { get; }
@@ -930,12 +957,12 @@ var tempVar = Expression.Parameter(invokeexpr.Type);
         {
             Errors.AddRange(errors);
         }
-        public TypeDefinition FindOrDefineType(TypeKind deftype, string text, bool isdefinition)
+        public TypeDefinition FindOrDeclareType(TypeKind deftype, string text, bool isdefinition)
         {
             TypeDefinition type;
             if (text != null && TryGetType(text, out type))
             {
-                if (type.TypeKind != deftype || type.IsComplete && isdefinition)
+                if (type.UnderlyingType.TypeKind != deftype || type.IsComplete && isdefinition)
                     throw new Exception($"Type {text} already defined.");
                 return type;
             }
@@ -948,6 +975,20 @@ var tempVar = Expression.Parameter(invokeexpr.Type);
             
         }
 
+        public TypeDefinition FindType(TypeKind deftype, string text)
+        {
+            TypeDefinition type;
+            if (text != null)
+                throw new ArgumentNullException(text);
+            if (TryGetType(text, out type))
+            {
+                if (type.UnderlyingType.TypeKind != deftype)
+                    throw new Exception($"Type {text} defined as different kind.");
+                return type;
+            }
+            else
+                throw new KeyNotFoundException($"Type {text} not found.");
+        }
         public bool TryGetType(string name, out TypeDefinition type)
         {
             type = TypeDefinition.FromString(name);
@@ -972,6 +1013,7 @@ var tempVar = Expression.Parameter(invokeexpr.Type);
         {
             if (CompiledFunction != null)
                 return CompiledFunction;
+            
             var lambda = Expression.Lambda<Action<BinaryTemplateContext, BinaryTemplateScope>>(Expression.Block(Statements), Parameters);
 
             CompiledFunction = lambda.Compile();
@@ -1015,6 +1057,43 @@ var tempVar = Expression.Parameter(invokeexpr.Type);
                 return false;
             EnumConsts.Add(constvar);
             return true;
+        }
+
+
+        public void DefineType(TypeDefinition deftype)
+        {
+            if (deftype == null)
+                throw new ArgumentNullException(nameof(deftype));
+            if (deftype.Name == null)
+                throw new ArgumentNullException(nameof(deftype.Name));
+            if (Typedefs.TryGetValue(deftype.Name, out TypeDefinition type))
+            {
+                if (deftype == type)
+                    return;
+                else if (deftype.UnderlyingType.TypeKind == type.UnderlyingType.TypeKind)
+                {
+                    if (type.UnderlyingType.IsComplete && deftype.UnderlyingType.IsComplete)
+                        throw new Exception($"Type {type.Name} is already defined.");
+                    else if (deftype.IsComplete)
+                    {
+                        Typedefs.Remove(type);
+                        Typedefs.Add(deftype);
+                        if (type.References != null)
+                        {
+                            deftype?.References.AddRange(type.References);
+                            foreach (var typeref in type.References)
+                            {
+                                typeref.ElementType = deftype;
+                            }
+                        }
+                            
+                    }
+                }
+                else
+                    throw new Exception($"Type {type.Name} defined as different kind.");
+            }
+            else
+                Typedefs.Add(deftype);
         }
     }
 

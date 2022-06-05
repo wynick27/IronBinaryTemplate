@@ -69,9 +69,21 @@ namespace IronBinaryTemplate
             return s;
         }
 
-        public BinaryTemplateReaderState MapType(TypeDefinition type)
+        public BinaryTemplateReaderState MapType(TypeDefinition type, int length = 1)
         {
-            return type.IsBitfield ? CurrentReader.SkipBits(type.BitSize.Value, type.Size.Value) : CurrentReader.SkipBytes(type.Size.Value);
+            return type.IsBitfield ? CurrentReader.SkipBits(type.BitSize.Value * length, type.Size.Value) : CurrentReader.SkipBytes(type.Size.Value * length);
+        }
+
+
+        public BinaryTemplateReaderState SkipBytes(long bytes)
+        {
+            return CurrentReader.SkipBytes(bytes);
+        }
+
+
+        public BinaryTemplateReaderState SkipBits(long bytes)
+        {
+            return CurrentReader.SkipBits(bytes);
         }
 
         public object ReadBasicType(TypeDefinition type, BinaryTemplateReaderState state, bool restorestate=true)
@@ -109,24 +121,29 @@ namespace IronBinaryTemplate
             return result;
         }
 
-        public byte[] ReadString()
+
+        public byte[] ReadString(int maxLen = -1)
         {
             List<byte> chars = new List<byte>();
             byte ch;
-            while ((ch = CurrentReader.ReadByte()) != '\0')
+            int curLen = 0;
+            while ((curLen < maxLen || maxLen == -1) && (ch = CurrentReader.ReadByte()) != '\0')
             {
                 chars.Add(ch);
+                curLen++;
             }
             return chars.ToArray();
         }
 
-        public string ReadWString()
+        public string ReadWString(int maxLen = -1)
         {
             StringBuilder sb = new StringBuilder();
             char ch;
-            while ((ch = (char)CurrentReader.ReadUInt16()) != '\0')
+            int curLen = 0;
+            while ((curLen < maxLen || maxLen == -1) && (ch = (char)CurrentReader.ReadUInt16()) != '\0')
             {
                 sb.Append(ch);
+                curLen++;
             }
             return sb.ToString();
         }
@@ -234,6 +251,8 @@ namespace IronBinaryTemplate
                 return -1;
             }
         }
+
+
         [TemplateCallable]
         protected virtual BinaryTemplateString GetFileName()
         {
@@ -248,6 +267,52 @@ namespace IronBinaryTemplate
             else
                 return "";
         }
+
+        [TemplateCallable]
+        public byte[] ReadString(long pos, int maxLen = -1)
+        {
+            
+            var state = CurrentReader.SaveState();
+            if (pos != -1) CurrentReader.Position = pos;
+            var value = ReadString(maxLen);
+            CurrentReader.LoadState(state);
+            return value;
+        }
+
+        [TemplateCallable]
+        public string ReadWString(long pos, int maxLen = -1)
+        {
+
+            var state = CurrentReader.SaveState();
+            if (pos != -1) CurrentReader.Position = pos;
+            var value = ReadWString(maxLen);
+            CurrentReader.LoadState(state);
+            return value;
+        }
+
+        [TemplateCallable]
+        public int ReadStringLength(long pos, int maxLen = -1)
+        {
+
+            var state = CurrentReader.SaveState();
+            if (pos != -1) CurrentReader.Position = pos;
+            var value = ReadString(maxLen).Length;
+            CurrentReader.LoadState(state);
+            return value;
+        }
+
+        [TemplateCallable]
+        public int ReadWStringLength(long pos, int maxLen = -1)
+        {
+
+            var state = CurrentReader.SaveState();
+            if (pos != -1) CurrentReader.Position = pos;
+            var value = ReadWString(maxLen).Length;
+            CurrentReader.LoadState(state);
+            return value;
+        }
+
+
         [TemplateCallable]
         protected virtual double ReadDouble(long pos = -1)
         {
@@ -322,6 +387,12 @@ namespace IronBinaryTemplate
             CurrentReader.LoadState(state);
             return value;
         }
+        [TemplateCallable]
+        protected virtual sbyte ReadByte(long pos = -1)
+        {
+            return (sbyte)ReadUByte(pos);
+        }
+
         [TemplateCallable]
         protected virtual uint ReadUInt(long pos = -1)
         {

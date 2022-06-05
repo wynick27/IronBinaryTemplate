@@ -29,6 +29,8 @@ namespace IronBinaryTemplate
     {
         ValueAccess AccessMode { get; set; }
 
+        bool IsWritable { get; }
+
         Expression GetAssignmentExpression(Expression valueexpr);
 
         List<Expression> GetPathExpressions();
@@ -43,6 +45,7 @@ namespace IronBinaryTemplate
             {
                  Compile();
             }
+            var allarguments = new List<object>() { scope };
             return CompiledFunction(scope);
         }
 
@@ -53,7 +56,7 @@ namespace IronBinaryTemplate
 
         protected void Compile()
         {
-            CompiledFunction = Expression.Lambda(this, LexicalScope.GetParameterList()).Compile(true) as Func<IBinaryTemplateScope, object>;
+            CompiledFunction = Expression.Lambda<Func<IBinaryTemplateScope, object>>(this, LexicalScope.ScopeParam).Compile(true);
         }
         
     }
@@ -100,7 +103,10 @@ namespace IronBinaryTemplate
 
         public Expression StaticBoundExpression => LexicalScope.GetParameter(VariableName);
 
-        public override Type Type => StaticBoundExpression?.Type ?? typeof(object);
+        public override Type Type => AccessMode == ValueAccess.ByValue ? typeof(object) : StaticBoundExpression?.Type ?? typeof(object);
+
+        public bool IsWritable => StaticBoundExpression != null && StaticBoundExpression.Reduce() is ParameterExpression;
+
         public List<Expression> GetPathExpressions()
         {
             return new List<Expression>() { Expression.Constant(VariableName) };
@@ -110,8 +116,8 @@ namespace IronBinaryTemplate
         {
             var boundExpression = StaticBoundExpression;
             if (boundExpression != null)
-                return boundExpression;
-            if (AccessMode == ValueAccess.ByValue)
+                return AccessMode == ValueAccess.ByValue ? Expression.Convert(boundExpression,typeof(object)) : boundExpression;
+            if (AccessMode != ValueAccess.Wrapper)
                 return Expression.MakeIndex(LexicalScope.GetParameter("this"), typeof(IBinaryTemplateScope).GetProperties().First(x => x.GetIndexParameters().Length > 0),
                 new Expression[] { Expression.Constant(VariableName) });
             else
@@ -123,6 +129,11 @@ namespace IronBinaryTemplate
         {
             var result = Reduce();
             return Expression.Assign(result, RuntimeHelpers.DynamicConvert(valueexpr, result.Type));
+        }
+
+        public override object Eval(IBinaryTemplateScope scope)
+        {
+            return scope[this.VariableName];
         }
 
     }
@@ -140,9 +151,12 @@ namespace IronBinaryTemplate
             LexicalScope = Variable.LexicalScope;
         }
         public ValueAccess AccessMode { get; set; }
+
+        public bool IsWritable => false;
+
         public override Expression Reduce()
         {
-            if (AccessMode == ValueAccess.ByValue)
+            if (AccessMode != ValueAccess.Wrapper)
                 return Expression.Dynamic(new BTGetMemberBinder(Member, false), typeof(object), Variable);
             else
                 return Expression.Call(Expression.Convert(Variable, typeof(IBinaryTemplateScope)), typeof(IBinaryTemplateScope).GetMethod("GetVariable"),
@@ -172,6 +186,8 @@ namespace IronBinaryTemplate
 
         public ValueAccess AccessMode { get; set; }
 
+        public bool IsWritable => false;
+
         public ArrayAccessExpr(Expr variable, Expr index)
         {
             Variable = variable;
@@ -180,7 +196,7 @@ namespace IronBinaryTemplate
         }
         public override Expression Reduce()
         {
-            if (AccessMode == ValueAccess.ByValue)
+            if (AccessMode != ValueAccess.Wrapper)
                 return Expression.Dynamic(new BTGetIndexrBinder(new CallInfo(1)), typeof(object), Variable, Index);
             else
                 return Expression.Call(Expression.Convert(Variable, typeof(IBinaryTemplateArray)), typeof(IBinaryTemplateArray).GetMethod("GetVariable"),
@@ -247,21 +263,38 @@ namespace IronBinaryTemplate
             LexicalScope = oprand.LexicalScope;
             Operator = exprType;
             Oprand = oprand;
+            
+            //Body = Expression.MakeUnary(Operator, oprand, oprand.GetType());
+        }
+
+        public Expression Body { get; }
+
+        public override ExpressionType NodeType => ExpressionType.Extension;
+
+        public override Type Type => Reduce().Type;
+
+        public override bool CanReduce => true;
+
+        public override Expression Reduce()
+        {
             if (IsAssignment)
             {
                 var lvalue = Oprand as ILValue;
 
+                if (lvalue.IsWritable)
+                    return Expression.MakeUnary(Operator, Oprand.Reduce(), Oprand.Type);
+
                 if (IsPreOperation)
                 {
-                    var tempexpr = Expression.Dynamic(new BTBinaryOperationBinder(UnderlyingOperation), typeof(object), oprand, Expression.Constant(1));
-                    Body = lvalue.GetAssignmentExpression(tempexpr);
+                    var tempexpr = Expression.Dynamic(new BTBinaryOperationBinder(UnderlyingOperation), typeof(object), Oprand, Expression.Constant(1));
+                    return lvalue.GetAssignmentExpression(tempexpr);
                 }
                 else
                 {
-                    var tempexpr = Expression.Variable(oprand.Type);
-                    Body = Expression.Block(
+                    var tempexpr = Expression.Variable(Oprand.Type);
+                    return Expression.Block(
                         new ParameterExpression[] { tempexpr },
-                        Expression.Assign(tempexpr, oprand),
+                        Expression.Assign(tempexpr, Oprand),
                         lvalue.GetAssignmentExpression(Expression.Dynamic(new BTBinaryOperationBinder(UnderlyingOperation), typeof(object), tempexpr, Expression.Constant(1))),
                         tempexpr
                         );
@@ -270,22 +303,7 @@ namespace IronBinaryTemplate
 
 
             }
-            else
-                Body = Expression.Dynamic(new BTUnaryOperationBinder(Operator), typeof(object), oprand);
-            //Body = Expression.MakeUnary(Operator, oprand, oprand.GetType());
-        }
-
-        public Expression Body { get; }
-
-        public override ExpressionType NodeType => ExpressionType.Extension;
-
-        public override Type Type => Body.Type;
-
-        public override bool CanReduce => true;
-
-        public override Expression Reduce()
-        {
-            return Body;
+            return Expression.Dynamic(new BTUnaryOperationBinder(Operator), typeof(object), Oprand);
         }
 
     }
@@ -357,6 +375,9 @@ namespace IronBinaryTemplate
         }
         private void SetupBody(ExpressionType Operator, Expression lhs, Expression rhs)
         {
+            if (rhs.Type != typeof(object))
+                rhs = Expression.Convert(rhs, typeof(object));
+            
             if (Operator == ExpressionType.AndAlso || Operator == ExpressionType.OrElse)
                 //    Body = IfThenElse(,lhs,rhs);
                 Body = Expression.MakeBinary(Operator, RuntimeHelpers.DynamicConvert(lhs, typeof(bool)), RuntimeHelpers.DynamicConvert(rhs, typeof(bool)));
@@ -371,7 +392,12 @@ namespace IronBinaryTemplate
                 Body = lvalue.GetAssignmentExpression(rightvalue);
             }
             else
+            {
+                if (lhs.Type != typeof(object))
+                    lhs = Expression.Convert(lhs, typeof(object));
                 Body = Expression.Dynamic(new BTBinaryOperationBinder(Operator), typeof(object), lhs, rhs);
+            }
+                
         }
 
         public override Type Type => Body.Type;
@@ -386,8 +412,8 @@ namespace IronBinaryTemplate
 
     public class Initializer : BTNode
     {
-        public Expression Value;
-        public List<Initializer> Initializers;
+        public Expression Value { get; }
+        public List<Initializer> Initializers { get; }
         public Initializer(Expression value)
         {
             Value = value;
@@ -395,6 +421,13 @@ namespace IronBinaryTemplate
         public Initializer()
         {
             Initializers = new List<Initializer>();
+        }
+
+        public override Type Type => Initializers == null ? typeof(object) : typeof(object[]);
+
+        public override Expression Reduce()
+        {
+            return Initializers == null ? RuntimeHelpers.EnsureObjectResult(Value) : Expression.NewArrayInit(typeof(object), Initializers);
         }
     }
 
@@ -418,7 +451,7 @@ namespace IronBinaryTemplate
 
         public override Expression Reduce()
         {
-            return Expression.Condition(RuntimeHelpers.DynamicConvert(Test,typeof(bool)),TrueExpr,FalseExpr);
+            return Expression.Condition(RuntimeHelpers.DynamicConvert(Test,typeof(bool)),Convert(TrueExpr,typeof(object)), Convert(FalseExpr,typeof(object)));
         }
     }
 
@@ -426,6 +459,8 @@ namespace IronBinaryTemplate
     {
         public TypeDefinition TypeDefinition { get; }
         public Expr Expr { get; }
+
+        public override Type Type => TypeDefinition.ClrType;
 
         public CastExpr(TypeDefinition typeDefinition, Expr expr)
         {
@@ -473,41 +508,79 @@ namespace IronBinaryTemplate
         ParameterExpression[] GetParameterList();
 
         ParameterExpression GetParameter(string name);
-        Expression Scope { get; }
+        ParameterExpression ScopeParam { get; }
         Expression Context { get; }
     }
 
-    public class CustomAttribute: ILexicalScope
+    public enum AttributeKind
     {
-        public ParameterExpression VariableRef { get;  }
-        public string Name { get; }
+        Literal,
+        Function,
+        Expression
+    }
 
-        public Expr Expr { get; internal set; }
 
-        public Expression Scope => Expression.Property(VariableRef,"Scope");
+    public class CustomAttribute : ILexicalScope
+    {
+        public AttributeKind AttributeKind { get; internal set; }
 
-        public Expression Context => Expression.Property(VariableRef, "Context");
+
+        public virtual string AsName()
+        {
+            if (Expr is VariableAccessExpr varaccess)
+                return varaccess.VariableName;
+            return null;
+        }
 
         public CustomAttribute(string name)
         {
             Name = name;
-            VariableRef = Expression.Parameter(typeof(BinaryTemplateVariable));
+            ScopeParam = Expression.Parameter(typeof(IBinaryTemplateScope), "scope");
         }
 
-        public ParameterExpression GetParameter(string name)
+        public virtual object Eval(BinaryTemplateVariable var)
         {
-            if (name == "this")
-                return VariableRef;
-            return null;
+            return Expr.Eval(new BinaryTemplateVariableScope(var));
+        }
+        public virtual T Eval<T>(BinaryTemplateVariable var)
+        {
+            try
+            {
+                object obj = Eval(var);
+                return RuntimeHelpers.ChangeType<T>(obj);
+            }
+            catch (Exception ex)
+            {
+            }
+            
+            return default(T);
         }
 
         public ParameterExpression[] GetParameterList()
-            => new[] { VariableRef };
+        {
+            return new[] { ScopeParam };
+        }
+
+        public ParameterExpression GetParameter(string name)
+            => null;
+
+        public string Name { get; }
+
+        public Expr Expr { get; internal set; }
+
+        public ParameterExpression ScopeParam { get; }
+
+        public Expression Context => null;
+
+        public ICallableFunction Function { get; internal set; }
+
     }
+
 
     public class VariableDeclaration : BTNode
     {
-        public TypeDefinition _elementType;
+
+        public TypeDefinition ElementType { get; internal set; }
         public TypeDefinition TypeDefinition { get => GetTypeDefinition(); }
         public string Name { get; internal set; }
         public bool IsConst { get; internal set; }
@@ -517,13 +590,15 @@ namespace IronBinaryTemplate
         public bool IsBitfield => BitfieldExpression != null;
 
         public bool IsConstBitfield => BitfieldExpression is ConstExpr && (BitfieldExpression as ConstExpr).Type.IsPrimitive;
-        public Initializer Initializer;
-        public CustomAttributeCollection CustomAttributes;
+        public Initializer Initializer { get; internal set; }
+        public CustomAttributeCollection CustomAttributes { get; internal set; }
 
         public List<Expression> Arguments = new List<Expression>();
         public List<Expression> ArrayDimensions = new List<Expression>();
         public Expression BitfieldExpression { get; internal set; }
-        public override Type Type => typeof(void);
+        public override Type Type => typeof(BinaryTemplateVariable);
+
+        public List<VariableAccessExpr> References { get; }
 
         public CompoundDefinition Parent;
 
@@ -543,34 +618,57 @@ namespace IronBinaryTemplate
         {
             get
             {
-                return _elementType.IsFixedSize && (IsArray ? IsConstArray : true);
+                return ElementType.IsFixedSize && (IsArray ? IsConstArray : true) && (IsBitfield ? IsConstBitfield : true);
             }
         }
         public int? Size
         {
             get
             {
+                if (!IsFixedSize)
+                    return null;
                 if (IsArray)
                 {
-                    if (IsFixedSize)
-                        return ArrayDimensions.Sum(arg => (int)((arg as ConstExpr).Value));
-                    else
-                        return null;
+                    return ArrayDimensions.Aggregate(ElementType.Size, (size,arg) => size * (int)((arg as ConstExpr).Value));
                 }
-                return _elementType.Size;
+                return ElementType.Size;
             }
         }
 
+        public int? BitSize
+        {
+            get
+            {
+                if (!IsFixedSize)
+                    return null;
+                var bitsize = IsBitfield ? (int)(BitfieldExpression as ConstExpr).Value : ElementType.BitSize;
+                if (IsArray)
+                {
+                    return ArrayDimensions.Aggregate(bitsize, (size, arg) => size * (int)((arg as ConstExpr).Value));
+                }
+                return bitsize;
+            }
+        }
 
+        public Type ClrType
+        {
+            get
+            {
+                var type = TypeDefinition.ClrType;
+                if (IsReference)
+                    return type.MakeByRefType();
+                return type;
+            }
+        }
 
         public VariableDeclaration(TypeDefinition typedef)
         {
-            this._elementType = typedef;
+            ElementType = typedef;
         }
 
         protected TypeDefinition GetTypeDefinition(IList<int?> arguments = null)
         {
-            var typedef = _elementType;
+            var typedef = ElementType;
             if (IsArray)
             {
                 if (IsConstArray)
@@ -589,7 +687,11 @@ namespace IronBinaryTemplate
                 }
                 else
                 {
-                    throw new ArgumentNullException("arguments");
+                    foreach (var arraydimension in ArrayDimensions)
+                    {
+                        typedef = typedef.GetArrayType(null);
+                    }
+                    //throw new ArgumentNullException("arguments");
                 }
 
             }
@@ -612,19 +714,19 @@ namespace IronBinaryTemplate
             return typedef;
         }
 
-        public BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, IList<int?> arrayarguments, IList<object> arguments)
+        public BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, IList<int?> arrayarguments, IList<object> arguments,object initializer = null)
         {
             var typedef = GetTypeDefinition(arrayarguments);
+            scope.BeginNewVariable(Name);
             BinaryTemplateVariable variable;
             if (IsLocal)
             {
-                var initializer = arguments != null && arguments.Count >= 1 ? arguments[0] : null;
-                arguments = arguments != null && arguments.Count >= 1 ? arguments.Skip(1).ToArray() : arguments;
                 variable = typedef.CreateLocalInstance(scope, initializer, arguments.ToArray());
             }
             else
                 variable = typedef.CreateInstance(context, scope, arguments.ToArray());
-            variable.Name = Name;
+            scope.EndNewVariable(variable);
+            variable.CustomAttributes = this.CustomAttributes;
             return variable;
 
         }
@@ -639,23 +741,48 @@ namespace IronBinaryTemplate
                     if (expr == null)
                         arrayexprs.Add(Expression.Constant(null, typeof(int?)));
                     else
-                        arrayexprs.Add(Expression.Convert(Expression.Dynamic(new BTConvertBinder(typeof(int), false), typeof(int), expr), typeof(int?)));
+                        arrayexprs.Add(RuntimeHelpers.DynamicConvert(expr, typeof(int?)));
                 }
             }
             var arraydimensions = Expression.NewArrayInit(typeof(int?), arrayexprs);
-            List<Expression> exprs = new List<Expression>();
-            if (Initializer != null && Initializer.Value != null)
-                exprs.Add(Initializer.Value);
-            if (Arguments != null)
-                Arguments.ForEach(arg => exprs.Add(arg));
-            var argexprs = Expression.NewArrayInit(typeof(object), exprs.Select(expr => RuntimeHelpers.EnsureObjectResult(expr)));
-            return Expression.Call(Parent.Parameters[1], typeof(BinaryTemplateScope).GetMethod("SetVariable"),
-                Expression.Call(Expression.Constant(this), typeof(VariableDeclaration).GetMethod("CreateInstance"), Parent.Parameters[0], Parent.Parameters[1], arraydimensions, argexprs));
+           
+            
+            int argumentCount = Arguments == null  ? 0 : Arguments.Count;
+            CompoundDefinition compounddef = ElementType.UnderlyingType as CompoundDefinition;
+            List<ParameterExpression> parameters = null;
+            if (compounddef != null)
+            {
+                if (compounddef.Parameters.Count != argumentCount + 2)
+                    throw new RuntimeError("Argument and parameter count mismatch in constructor.");
+                parameters = compounddef.Parameters.Skip(2).ToList();
+            }
+            else if (argumentCount > 0)
+                throw new RuntimeError("Only struct or union supports constructor.");
+
+            return RuntimeHelpers.GetArgumentConvertedArrayExpression(parameters, Arguments, (converted) =>
+              {
+                  Expression initializerexpr = Initializer;
+
+              if (!IsLocal && !IsConst && Initializer != null)
+                          throw new RuntimeError("Template variables cannot have an initializer.");
+              if (initializerexpr == null)
+                      initializerexpr = Expression.Constant(null);
+
+                  return Expression.Call(Expression.Constant(this), typeof(VariableDeclaration).GetMethod("CreateInstance"),
+                      Parent.Context, Parent.ScopeParam, arraydimensions, converted, initializerexpr);
+              });
         }
 
         internal VariableDeclaration Clone()
         {
-            return MemberwiseClone() as VariableDeclaration;
+            var newvar = MemberwiseClone() as VariableDeclaration;
+            newvar.ElementType.References?.Add(newvar);
+            return newvar;
+        }
+
+        public override string ToString()
+        {
+            return $"{ElementType} {Name}";
         }
     }
 
@@ -874,7 +1001,7 @@ namespace IronBinaryTemplate
             }
             return SwitchCases.Reverse<SwitchCaseStmt>().Aggregate(DefaultExpr, (elseexpr, caseexpr) =>
             elseexpr != null ? Expression.IfThenElse(RuntimeHelpers.DynamicConvert(caseexpr.GetTestExpr(TestValueExpr), typeof(bool)), caseexpr.GetBodyExpr(), elseexpr) :
-            Expression.IfThen(caseexpr.GetTestExpr(TestValueExpr), caseexpr.GetBodyExpr()));
+            Expression.IfThen(RuntimeHelpers.DynamicConvert(caseexpr.GetTestExpr(TestValueExpr),typeof(bool)), caseexpr.GetBodyExpr()));
         }
 
         private Type GetSuperType()
@@ -937,7 +1064,7 @@ namespace IronBinaryTemplate
         public void SetFallthrough(SwitchCaseStmt nextcase)
         {
             Fallthrough = true;
-            if (Statements.Count != 0 && Statements[^1] is BreakStmt)
+            if (Statements.Count != 0 && Statements[^1] is JumpStmt)
             {
                 Fallthrough = false;
             }

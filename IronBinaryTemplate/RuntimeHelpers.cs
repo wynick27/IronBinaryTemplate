@@ -26,51 +26,227 @@ namespace IronBinaryTemplate
                 return System.Linq.Expressions.Expression.Convert(expr, typeof(object));
         }
 
-
-        public static Expression EnsureType(DynamicMetaObject obj, Type type)
+        public static Expression GetArgumentConvertedExpression(IList<ParameterExpression> parameters, List<Expression> arguments, Func<List<Expression>,Expression> exprconstructor)
         {
-            Expression expr = obj.Expression;
-            
-            if (obj.LimitType != obj.Expression.Type)
-                expr = Expression.Convert(expr, obj.LimitType);
-            if (obj.LimitType != type)
+            var converted = new List<Expression>();
+
+            var initexprs = new List<Expression>();
+            var updateexprs = new List<Expression>();
+            var tempvars = new List<ParameterExpression>();
+
+            if (arguments != null)
             {
-                if (type == typeof(bool) && obj.LimitType.IsPrimitive)
-                    return Expression.MakeBinary(ExpressionType.NotEqual, expr, Expression.Constant(0));
-                else if (type.IsPrimitive && obj.LimitType == typeof(bool))
-                    expr = Expression.IfThenElse(expr, Expression.Constant(1,type), Expression.Constant(0,type));
-                else if (type == typeof(string))
+                for (int i = 0; i < arguments.Count; i++)
                 {
-                    if (obj.LimitType == typeof(sbyte[]) || obj.LimitType == typeof(byte[]))
+                    var param = parameters[i];
+                    if (param.IsByRef && param.Type.IsValueType)
                     {
-                        expr = Expression.Convert(obj.Expression, typeof(byte[]));
-
-                        return Expression.Convert(expr, typeof(string), typeof(RuntimeHelpers).GetMethod("ConvertBytesToString"));
-
+                        if (arguments[i] is ILValue lvalue)
+                        {
+                            var tempVar = Expression.Variable(param.Type);
+                            lvalue.AccessMode = ValueAccess.Reference;
+                            tempvars.Add(tempVar);
+                            initexprs.Add(Expression.Assign(tempVar, RuntimeHelpers.DynamicConvert(arguments[i], param.Type)));
+                            updateexprs.Add(lvalue.GetAssignmentExpression(tempVar));
+                            converted.Add(tempVar);
+                            
+                        }
+                        else
+                        {
+                            throw new ArgumentException($"Arguments {param.Name} must be lvalue.");
+                        }
                     }
-                    else if (obj.LimitType == typeof(BinaryTemplateString))
-                        return Expression.Call(expr, typeof(BinaryTemplateString).GetMethod("ToString"));
+                    else if (param.Type == arguments[i].Type)
+                    {
+                        converted.Add(arguments[i]);
+                    }
+                    else if (param.Type != arguments[i].Type && param.Type.IsAssignableFrom(arguments[i].Type))
+                    {
+                        converted.Add(Expression.Convert(arguments[i], param.Type));
+                    }
+                    else
+                        converted.Add(RuntimeHelpers.DynamicConvert(arguments[i], param.Type));
+
+                }
+            }
+            var resultexpr = exprconstructor(converted);
+            if (initexprs.Count > 0)
+            {
+                if (resultexpr.Type != typeof(void))
+                {
+                    var tempVar = Expression.Parameter(resultexpr.Type);
+
+                    tempvars.Add(tempVar);
+                    initexprs.Add(Expression.Assign(tempVar, resultexpr));
+                    updateexprs.Add(tempVar);
+                }
+                else
+                    initexprs.Add(resultexpr);
+
+                initexprs.AddRange(updateexprs);
+
+                return Expression.Block(resultexpr.Type, tempvars, initexprs);
+            }
+            return resultexpr;
+        }
+
+
+        public static Expression GetArgumentConvertedArrayExpression(IList<ParameterExpression> parameters, List<Expression> arguments, Func<Expression, Expression> exprconstructor)
+        {
+            var converted = new List<Expression>();
+
+            var updateexprs = new List<Expression>();
+            var tempvars = new List<ParameterExpression>() { Expression.Parameter(typeof(object[])) };
+
+            if (arguments != null)
+            {
+                for (int i = 0; i < arguments.Count; i++)
+                {
+                    var param = parameters[i];
+                    if (param.IsByRef && param.Type.IsValueType)
+                    {
+                        if (arguments[i] is ILValue lvalue)
+                        {
+                            var tempVar = Expression.ArrayAccess(tempvars[0], Expression.Constant(i));
+                            converted.Add(RuntimeHelpers.EnsureObjectResult(arguments[i]));
+                            lvalue.AccessMode = ValueAccess.Reference;
+                            updateexprs.Add(lvalue.GetAssignmentExpression(tempVar));
+                        }
+                        else
+                        {
+                            throw new ArgumentException($"Arguments {param.Name} must be lvalue.");
+                        }
+                    }
+                   // else if (param.Type == arguments[i].Type)
+                  //  {
+                 //       converted.Add(RuntimeHelpers.EnsureObjectResult(arguments[i]));
+                  //  }
+                  //  else if (param.Type != arguments[i].Type && param.Type.IsAssignableFrom(arguments[i].Type))
+                  //  {
+                   //     converted.Add(RuntimeHelpers.EnsureObjectResult(Expression.Convert(arguments[i], param.Type)));
+                  //  }
+                    else
+                        converted.Add(RuntimeHelpers.EnsureObjectResult(RuntimeHelpers.DynamicConvert(arguments[i], param.Type)));
+
+                }
+            }
+            var arrayinit = Expression.NewArrayInit(typeof(object), converted);
+            
+            if (updateexprs.Count > 0)
+            {
+                var resultexpr = exprconstructor(Expression.Assign(tempvars[0], arrayinit));
+                if (resultexpr.Type != typeof(void))
+                {
+                    var tempVar = Expression.Variable(resultexpr.Type);
+                    tempvars.Add(tempVar);
+                    updateexprs.Insert(0,Expression.Assign(tempVar, resultexpr));
+                    updateexprs.Add(tempVar);
+                }
+                else
+                    updateexprs.Insert(0, resultexpr);
+
+                return Expression.Block(resultexpr.Type, tempvars, updateexprs);
+            }
+            else
+            {
+                return exprconstructor(arrayinit);
+            }
+            
+        }
+
+        static Dictionary<(Type, Type), Func<object, object>> typeConversionMap = new Dictionary<(Type, Type), Func<object, object>>();
+        static Dictionary<(Type, Type), Func<Expression, Expression>> typeConversionExprMap = new Dictionary<(Type, Type), Func<Expression, Expression>>();
+
+
+        public static void AddBasicConversionFunction(Type fromType, Type targetType)
+        {
+            AddConversionFunction(fromType, targetType, expr => Expression.Convert(
+                    Expression.Convert(Expression.Convert(expr, fromType), targetType)
+                , typeof(object)
+                ),false);
+        }
+
+        public static void AddConversionFunction(Type fromType, Type targetType, Func<Expression, Expression> exprconv,bool addtoexprmap = true)
+        {
+            if (addtoexprmap)
+                typeConversionExprMap[(fromType, targetType)] = exprconv;
+            ParameterExpression convParameter = Expression.Parameter(typeof(object), "val");
+            var conv = (Func<object, object>)Expression.Lambda(
+                exprconv(convParameter)
+                , convParameter
+            ).Compile();
+            typeConversionMap[(fromType, targetType)] = conv;
+        }
+
+        static RuntimeHelpers()
+        {
+            //Add narrowing unchecked functions
+            
+            for (int i = (int)TypeCode.Byte;i <= (int)TypeCode.Double; i++)
+            {
+                for (int j = (int)TypeCode.SByte; j < i; j++)
+                {
+                    Type t1 = Type.GetType("System." + Enum.GetName(typeof(TypeCode), i));
+                    Type t2 = Type.GetType("System." + Enum.GetName(typeof(TypeCode), j));
+                    AddBasicConversionFunction(t1, t2);
+                }
+            }
+            Func<Expression,Expression> func = expr => Expression.Convert(Expression.Convert(expr, typeof(byte[])),typeof(string), typeof(RuntimeHelpers).GetMethod("ConvertBytesToString"));
+            AddConversionFunction(typeof(byte[]), typeof(string), func);
+            AddConversionFunction(typeof(sbyte[]), typeof(string), func);
+            AddConversionFunction(typeof(BinaryTemplateString), typeof(string), expr => Expression.Convert(Expression.Convert(expr, typeof(BinaryTemplateString)), typeof(string)));
+            //AddConversionFunction(typeof(string), typeof(BinaryTemplateString), expr => Expression.Convert(Expression.Convert(expr, typeof(string)), typeof(BinaryTemplateString)));
+            AddConversionFunction(typeof(byte[]), typeof(BinaryTemplateString), expr => Expression.Convert(Expression.Convert(expr, typeof(byte[])), typeof(BinaryTemplateString)));
+            AddConversionFunction(typeof(sbyte[]), typeof(BinaryTemplateString), expr => Expression.Convert(Expression.Convert(expr, typeof(sbyte[])), typeof(BinaryTemplateString)));
+            //AddConversionFunction(typeof(BinaryTemplateString), typeof(string), expr => Expression.Call(expr, typeof(BinaryTemplateString).GetMethod("ToString")));
+        }
+        public static bool IsTypeCompatible(Type t1, Type t2)
+        {
+            if (t1 == t2)
+                return true;
+            if (t1.IsPrimitive && t2.IsPrimitive)
+                return true;
+            if (t1.IsAssignableTo(t2))
+                return true;
+            if (typeConversionMap.ContainsKey((t1, t2)))
+                return true;
+            try
+            {
+                Expression.Convert(Expression.Default(t1), t2);
+                return true;
+            }
+            catch (Exception)
+            {
+
+                return false;
+            }
+        }
+        public static Expression EnsureType(Expression expr, Type runtimetype, Type type)
+        {
+            if (runtimetype != expr.Type)
+                expr = Expression.Convert(expr, runtimetype);
+            if (runtimetype != type)
+            {
+                if (type == typeof(bool) && runtimetype.IsPrimitive)
+                    return Expression.MakeBinary(ExpressionType.NotEqual, expr, Expression.Convert(Expression.Constant(0), runtimetype));
+                else if (type.IsPrimitive && runtimetype == typeof(bool))
+                    expr = Expression.IfThenElse(expr, Expression.Constant(1, type), Expression.Constant(0, type));
+                else if (typeConversionExprMap.TryGetValue((runtimetype, type), out Func<Expression, Expression> convfunc))
+                {
+                    return convfunc(expr);
 
                 }
                 expr = Expression.Convert(expr, type);
             }
-                
+
             return expr;
         }
-        ///////////////////////////////////////
-        // Utilities used by binders at runtime
-        ///////////////////////////////////////
 
-        // ParamsMatchArgs returns whether the args are assignable to the parameters.
-        // We specially check for our TypeModel that wraps .NET's RuntimeType, and
-        // elsewhere we detect the same situation to convert the TypeModel for calls.
-        //
-        // Consider checking p.IsByRef and returning false since that's not CLS.
-        //
-        // Could check for a.HasValue and a.Value is None and
-        // ((paramtype is class or interface) or (paramtype is generic and
-        // nullable<t>)) to support passing nil anywhere.
-        //
+        public static Expression EnsureType(DynamicMetaObject obj, Type type)
+        {
+            return EnsureType(obj.Expression, obj.LimitType, type);
+        }
+
         public static bool ParametersMatchArguments(ParameterInfo[] parameters,
                                                     DynamicMetaObject[] args)
         {
@@ -88,7 +264,7 @@ namespace IronBinaryTemplate
             return true;
         }
         public static Expression[] ConvertArguments(
-                                DynamicMetaObject[] args, ParameterInfo[] ps)
+                                DynamicMetaObject[] args, ParameterInfo[] ps, ref BindingRestrictions restrictions)
         {
             ParameterInfo paramArray = null;
             List<Expression> paramArgs = null;
@@ -102,16 +278,35 @@ namespace IronBinaryTemplate
             List<Expression> callArgs = new List<Expression>();
             for (int i = 0; i < args.Length; i++)
             {
+                restrictions.Merge(BindingRestrictions.GetTypeRestriction(args[i].Expression, args[i].LimitType));
+                var paramType = (paramArray != null && i >= ps.Length - 1) ? paramArray.ParameterType.GetElementType() : ps[i].ParameterType;
+                Expression argExpr = args[i].Expression;
+                Type argType = args[i].LimitType;
+                if (!IsTypeCompatible(args[i].LimitType, paramType) && (args[i].Value as BinaryTemplateVariable).Value != args[i].Value)
+                {
+                    var value = (args[i].Value as BinaryTemplateVariable).Value;
+                    if (IsTypeCompatible(value.GetType(), paramType))
+                    {
+                        argType = value.GetType();
+                        argExpr = Expression.Property(Expression.Convert(argExpr, typeof(BinaryTemplateVariable)), "Value");
+                        restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(argExpr, argType));
+                    }
+
+                }
+                argExpr = EnsureType(argExpr, argType, paramType);
+
                 if (paramArray != null && i >=  ps.Length-1)
                 {
-                    Expression argExpr = EnsureType(args[i], paramArray.ParameterType.GetElementType());
                     paramArgs.Add(argExpr);
                 } else
                 {
-                    Expression argExpr = EnsureType(args[i], ps[i].ParameterType);
                     callArgs.Add(argExpr);
                 }
                 
+            }
+            for (int i=args.Length;i<ps.Length - (paramArgs == null ? 0 : 1);i++)
+            {
+                callArgs.Add(Expression.Constant(ps[i].DefaultValue));
             }
             if (paramArray != null)
                 callArgs.Add(Expression.NewArrayInit(paramArray.ParameterType.GetElementType(), paramArgs));
@@ -129,7 +324,7 @@ namespace IronBinaryTemplate
         //
         public static BindingRestrictions GetTargetArgsRestrictions(
                 DynamicMetaObject target, DynamicMetaObject[] args,
-                bool instanceRestrictionOnTarget)
+                bool instanceRestrictionOnTarget, bool instanceRestrictionOnArgs)
         {
             // Important to add existing restriction first because the
             // DynamicMetaObjects (and possibly values) we're looking at depend
@@ -155,10 +350,10 @@ namespace IronBinaryTemplate
             for (int i = 0; i < args.Length; i++)
             {
                 BindingRestrictions r;
-                if (args[i].HasValue && args[i].Value == null)
+                if (args[i].HasValue && args[i].Value == null || instanceRestrictionOnArgs)
                 {
                     r = BindingRestrictions.GetInstanceRestriction(
-                            args[i].Expression, null);
+                            args[i].Expression, args[i].Value);
                 }
                 else
                 {
@@ -182,8 +377,9 @@ namespace IronBinaryTemplate
         {
             Debug.Assert(target.HasValue && target.LimitType != typeof(Array));
 
+
             var indexExpressions = indexes.Select(
-                i => Expression.Convert(i.Expression, i.LimitType))
+                i => RuntimeHelpers.EnsureType(i, target.LimitType.IsArray ? typeof(int) : i.LimitType))
                 .ToArray();
             if (target.LimitType.IsArray)
             {
@@ -196,7 +392,10 @@ namespace IronBinaryTemplate
             }
             else
             {
-                var props = target.LimitType.GetProperties();
+                var searchtype = target.LimitType;
+                if (searchtype.IsAssignableTo(typeof(IBinaryTemplateArray)))
+                    searchtype = typeof(IBinaryTemplateArray);
+                var props = searchtype.GetProperties();
                 var indexers = props.
                     Where(p => p.GetIndexParameters().Length > 0).ToArray();
                 indexers = indexers.
@@ -210,6 +409,11 @@ namespace IronBinaryTemplate
                                           idxer.GetIndexParameters(), indexes))
                     {
                         // all parameter types match
+                        res.Add(idxer);
+                    }
+                    else if (indexes.Length == 1 && idxer.GetIndexParameters()[0].ParameterType.IsPrimitive && indexes[0].LimitType.IsPrimitive)
+                    {
+                        indexExpressions[0] = Expression.Convert(indexExpressions[0], idxer.GetIndexParameters()[0].ParameterType);
                         res.Add(idxer);
                     }
                 }
@@ -433,7 +637,7 @@ namespace IronBinaryTemplate
         }
 
         public static PropertyInfo GetIntIndexer(Type type) => GetIndexer(type, typeof(int));
-        public static PropertyInfo GetStringIndexer(Type type) => GetIndexer(type, typeof(int));
+        public static PropertyInfo GetStringIndexer(Type type) => GetIndexer(type, typeof(string));
 
         public static Type LiftType(Type type1, Type type2)
         {
@@ -465,19 +669,11 @@ namespace IronBinaryTemplate
                 return Convert.ToBoolean(obj) ? 1 : 0 ;
             if (type == typeof(bool) && obj.GetType().IsPrimitive)
                 return Convert.ToUInt64(obj) != 0;
+            
+            if (typeConversionMap.TryGetValue((obj.GetType(), type), out Func<object, object> convfunc))
+                return convfunc(obj);
             if (obj.GetType().IsPrimitive && type.IsPrimitive)
                 return Convert.ChangeType(obj, type);
-            if (type == typeof(string))
-            {
-                if (obj.GetType() == typeof(BinaryTemplateString))
-                {
-                    return (obj as BinaryTemplateString).ToString();
-                }
-            }
-           // if ((type1 == typeof(byte[]) || type1 == typeof(sbyte[]) || type1 == typeof(BinaryTemplateString) || type1 == typeof(char[])) && type2 == typeof(string))
-            //    return typeof(string);
-            //if ((type2 == typeof(byte[]) || type2 == typeof(sbyte[]) || type2 == typeof(BinaryTemplateString) || type2 == typeof(char[])) && type1 == typeof(string))
-            //    return typeof(string);
             return null;
         }
 

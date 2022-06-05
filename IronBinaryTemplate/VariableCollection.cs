@@ -19,7 +19,7 @@ namespace IronBinaryTemplate
 
         protected override void InsertItem(int index, BinaryTemplateVariable item)
         {
-            if (allowDuplicates && Dictionary != null && Dictionary.ContainsKey(item.Name))
+            if (item.Name != null && allowDuplicates && Dictionary != null && Dictionary.ContainsKey(item.Name))
             {
                 if (Dictionary[item.Name] is BinaryTemplateDuplicatedArray duparr)
                 {
@@ -47,6 +47,17 @@ namespace IronBinaryTemplate
         }
     }
 
+
+
+    public class DefinitionCollection : KeyedCollection<string, VariableDeclaration>
+    {
+        protected override string GetKeyForItem(VariableDeclaration item)
+        {
+
+            return item.Name;
+        }
+    }
+
     public class TypeDefinitionCollection : KeyedCollection<string, TypeDefinition>
     {
         protected override string GetKeyForItem(TypeDefinition item)
@@ -61,5 +72,6 @@ namespace IronBinaryTemplate
         {
             return item.Name;
         }
+
     }
 }

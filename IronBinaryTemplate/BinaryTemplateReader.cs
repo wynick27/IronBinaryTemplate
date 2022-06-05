@@ -25,6 +25,7 @@ namespace IronBinaryTemplate
         private int _byteSize;
         private bool _bitRightToLeft = true;
         private ulong _cachedBitfield;
+        private bool _signExtensionMode = true;
 
         public bool PaddedMode
         {
@@ -63,7 +64,7 @@ namespace IronBinaryTemplate
                 if (_paddedMode != value)
                     _bitIndex = 0;
                 _littleEndian = value;
-
+                _bitRightToLeft = value;
             }
         }
 
@@ -365,6 +366,8 @@ namespace IronBinaryTemplate
 
         protected virtual long ReadPackedSBits(int count,int packsize)
         {
+            if (!_signExtensionMode)
+                return (long)ReadPackedUBits(count, packsize);
             if (packsize != _byteSize || _bitIndex == 0)
             {
                 _bitIndex = 0;
@@ -426,6 +429,8 @@ namespace IronBinaryTemplate
         public virtual long ReadSignedBits(int count)
         {
             long res = (long)ReadUnsignedBits(count);
+            if(!_signExtensionMode)
+                return (long)res;
             res = res << (64 - count) >> (64 - count);
             return res;
         }

@@ -50,6 +50,14 @@ namespace IronBinaryTemplate
 
     public class RuntimeError : BinaryTemplateError
     {
+        private string message;
+
+        public RuntimeError(string message)
+            :base(message, default)
+        {
+            this.message = message;
+        }
+
         public RuntimeError(string message, SourceLocation location = default) : base(message, location)
         {
         }

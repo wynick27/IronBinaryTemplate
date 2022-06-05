@@ -8,6 +8,110 @@ using Microsoft.CSharp.RuntimeBinder;
 
 namespace IronBinaryTemplate
 {
+
+
+    public class BTUnaryOperationBinder : UnaryOperationBinder
+    {
+        public new ExpressionType Operation { get; }
+        public BTUnaryOperationBinder(ExpressionType operation) : base(ExpressionType.Extension)
+        {
+            this.Operation = operation;
+        }
+
+        public override DynamicMetaObject FallbackUnaryOperation(DynamicMetaObject target, DynamicMetaObject errorSuggestion)
+        {
+            if (!target.HasValue)
+            {
+                return Defer(target);
+            }
+
+            var operation = this.Operation;
+            Expression expr = target.Expression;
+            Type targettype = target.LimitType;
+            var restriction = target.Restrictions.Merge(
+                    BindingRestrictions.GetTypeRestriction(
+                        target.Expression, target.LimitType));
+            if (target.LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && (target.Value as BinaryTemplateVariable).Value != target.Value)
+            {
+                expr = Expression.Property(Expression.Convert(target.Expression, typeof(BinaryTemplateVariable)), "Value");
+                targettype = (target.Value as BinaryTemplateVariable).Value.GetType();
+                restriction = target.Restrictions.Merge(BindingRestrictions.GetTypeRestriction(
+                        expr, targettype));
+            }
+            if (operation == ExpressionType.Extension) //!
+            {
+                operation = ExpressionType.Not;
+
+                if (targettype != typeof(bool) && targettype.IsPrimitive)
+                {
+                    return new DynamicMetaObject(
+                RuntimeHelpers.EnsureObjectResult(
+                  Expression.MakeBinary(
+                    ExpressionType.Equal,
+                    Expression.Convert(expr, targettype),
+                    Expression.Convert(Expression.Constant(0), targettype))),
+                     restriction);
+                }
+
+            }
+
+            expr = RuntimeHelpers.EnsureType(expr, targettype, targettype);
+
+
+            return new DynamicMetaObject(
+                RuntimeHelpers.EnsureObjectResult(
+                  Expression.MakeUnary(
+                    operation,
+                    expr, targettype)), restriction);
+        }
+    }
+
+    public class BTConvertBinder : ConvertBinder
+    {
+        public BTConvertBinder(Type type, bool @explicit) : base(type, @explicit)
+        {
+        }
+
+        public override DynamicMetaObject FallbackConvert(DynamicMetaObject target, DynamicMetaObject errorSuggestion)
+        {
+            if (!target.HasValue)
+                return Defer(target);
+
+            var targetexpr = target.Expression;
+            var targettype = target.LimitType;
+            BindingRestrictions restrictions = target.Restrictions;
+            if (target.LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && !this.Type.IsAssignableFrom(typeof(BinaryTemplateVariable)) && (target.Value as BinaryTemplateVariable).Value != target.Value)
+            {
+                targetexpr = Expression.Property(Expression.Convert(target.Expression, typeof(BinaryTemplateVariable)), "Value");
+                targettype = (target.Value as BinaryTemplateVariable).Value.GetType();
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(targetexpr, targettype));
+                try
+                {
+                    return new DynamicMetaObject(
+                RuntimeHelpers.EnsureType(targetexpr, targettype, this.Type),
+                restrictions);
+                }
+                catch (Exception)
+                {
+
+                    targetexpr = target.Expression;
+                    targettype = target.LimitType;
+                    restrictions = restrictions.Merge(BindingRestrictions.GetInstanceRestriction(targetexpr, target.Value));
+                }
+            }
+            else
+            {
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(
+                        target.Expression, target.LimitType));
+            }
+
+            return new DynamicMetaObject(
+                RuntimeHelpers.EnsureType(targetexpr, targettype, this.Type),
+                restrictions);
+
+        }
+    }
+
     public class BTBinaryOperationBinder : BinaryOperationBinder
     {
         ExpressionType operation;
@@ -33,38 +137,46 @@ namespace IronBinaryTemplate
             }
             Expression expr1 = target.Expression;
             Expression expr2 = arg.Expression;
+            Type targettype = target.LimitType;
+            Type argtype = arg.LimitType;
             var restrictions = target.Restrictions.Merge(arg.Restrictions)
                 .Merge(BindingRestrictions.GetTypeRestriction(
                     target.Expression, target.LimitType))
                 .Merge(BindingRestrictions.GetTypeRestriction(
                     arg.Expression, arg.LimitType));
-            if (isAssignment && target.LimitType.IsSubclassOf(typeof(BinaryTemplateVariable)))
+            
+            if (target.LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && (target.Value as BinaryTemplateVariable).Value != target.Value)
             {
-                restrictions.Merge(BindingRestrictions.GetInstanceRestriction(target.Expression, target.Value));
-                if (target.LimitType == typeof(LocalVariable))
-                {
-                    LocalVariable var = target.Value as LocalVariable;
-                    expr1 = Expression.Field(Expression.Convert(target.Expression,typeof(LocalVariable)), "value");
-                    expr2 = RuntimeHelpers.EnsureObjectResult(RuntimeHelpers.EnsureType(arg, var.Type.ClrType));
-                } else
-                {
-                    return RuntimeHelpers.CreateThrow(target, new[] { arg }, restrictions, typeof(InvalidOperationException), "Cannot assign non-local variable in template.");
-                }
+                expr1 = Expression.Property(Expression.Convert(target.Expression, typeof(BinaryTemplateVariable)), "Value");
+                targettype = (target.Value as BinaryTemplateVariable).Value.GetType();
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(expr1, targettype));
+
             }
-            else if (isAssignment)
+            if (arg.LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && (arg.Value as BinaryTemplateVariable).Value != arg.Value)
             {
-                expr2 = RuntimeHelpers.EnsureType(arg, target.LimitType);
+                expr2 = Expression.Property(Expression.Convert(arg.Expression, typeof(BinaryTemplateVariable)), "Value");
+                argtype = (arg.Value as BinaryTemplateVariable).Value.GetType();
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(expr2, argtype));
             }
-            else if (target.LimitType.IsPrimitive && arg.LimitType.IsPrimitive)
+            if (isAssignment)
             {
-                Type resulttype = RuntimeHelpers.LiftType(target.LimitType, arg.LimitType);
-                expr1 = RuntimeHelpers.EnsureType(target, resulttype);
-                expr2 = RuntimeHelpers.EnsureType(arg, resulttype);
+                expr2 = RuntimeHelpers.EnsureType(arg, targettype);
+            }
+            else if (operation == ExpressionType.LeftShift || operation == ExpressionType.RightShift)
+            {
+                expr1 = RuntimeHelpers.EnsureType(expr1, targettype, targettype);
+                expr2 = RuntimeHelpers.EnsureType(expr2, argtype, typeof(int));
+            }
+            else if (targettype.IsPrimitive && argtype.IsPrimitive)
+            {
+                Type resulttype = RuntimeHelpers.LiftType(targettype, argtype);
+                expr1 = RuntimeHelpers.EnsureType(expr1, targettype, resulttype);
+                expr2 = RuntimeHelpers.EnsureType(expr2, argtype, resulttype);
             }
             else
             {
-                expr1 = RuntimeHelpers.EnsureType(target, target.LimitType);
-                expr2 = RuntimeHelpers.EnsureType(arg, arg.LimitType);
+                expr1 = RuntimeHelpers.EnsureType(expr1, targettype, targettype);
+                expr2 = RuntimeHelpers.EnsureType(expr2, argtype, argtype);
             }
 
             return new DynamicMetaObject(
@@ -99,11 +211,75 @@ namespace IronBinaryTemplate
             }
 
 
-            var indexingExpr = RuntimeHelpers.EnsureObjectResult(
+            BindingRestrictions restrictions = target.Restrictions;
+            Expression indexingExpr = target.Expression;
+
+            if (target.LimitType.IsPrimitive && indexes.Length == 1)
+            {
+                
+                restrictions = target.Restrictions.Merge(BindingRestrictions.GetInstanceRestriction(
+                                                  target.Expression, target.Value));
+                if (indexes[0].LimitType.IsPrimitive && Convert.ToUInt64(indexes[0].Value) == 0)
+                {
+                    indexingExpr = target.Expression;
+
+                    restrictions = target.Restrictions.Merge(BindingRestrictions.GetInstanceRestriction(
+                                                  indexes[0].Expression, indexes[0].Value));
+                }
+                else if (indexes[0].LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) &&
+                    Convert.ToUInt64((indexes[0].Value as BinaryTemplateVariable).Value) == 0)
+                {
+
+                    
+                    restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(
+                                                  indexes[0].Expression, indexes[0].LimitType));
+                    
+                    var restrictionExpr = Expression.Property(Expression.Convert(indexes[0].Expression, typeof(BinaryTemplateVariable)), "Value");
+                    var currentValue = (indexes[0].Value as BinaryTemplateVariable).Value;
+
+                    restrictions = restrictions.Merge(BindingRestrictions.GetInstanceRestriction(restrictionExpr, currentValue));
+                    
+                    indexingExpr = target.Expression;
+                }
+                else
+                indexingExpr = Expression.Throw(
+                        Expression.New(
+                            typeof(MissingMemberException)
+                                .GetConstructor(new Type[] { typeof(string) }),
+                            Expression.Constant(
+                               "Index out of bound.")
+                        )
+                    );
+
+            }
+            else if (indexes.Length == 1 && indexes[0].LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && (indexes[0].Value as BinaryTemplateVariable).Value != indexes[0].Value)
+            {
+
+                restrictions = target.Restrictions.Merge(BindingRestrictions.GetTypeRestriction(
+                                                  target.Expression, target.LimitType));
+
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(
+                                              indexes[0].Expression, indexes[0].LimitType));
+
+                var restrictionExpr = Expression.Property(Expression.Convert(indexes[0].Expression, typeof(BinaryTemplateVariable)), "Value");
+                var currentValue = (indexes[0].Value as BinaryTemplateVariable).Value;
+
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(restrictionExpr, currentValue.GetType()));
+                var newmetaobject = new DynamicMetaObject(restrictionExpr, restrictions, currentValue);
+                indexingExpr = RuntimeHelpers.EnsureObjectResult(
+                                  RuntimeHelpers.GetIndexingExpression(target,
+                                                                       new[] { newmetaobject }));
+            }
+            else
+            {
+                indexingExpr = RuntimeHelpers.EnsureObjectResult(
                                   RuntimeHelpers.GetIndexingExpression(target,
                                                                        indexes));
-            var restrictions = RuntimeHelpers.GetTargetArgsRestrictions(
-                                                  target, indexes, false);
+                restrictions = restrictions.Merge(RuntimeHelpers.GetTargetArgsRestrictions(
+                                                      target, indexes, false, false));
+            }
+
+            
             return new DynamicMetaObject(indexingExpr, restrictions);
         }
     }
@@ -120,7 +296,20 @@ namespace IronBinaryTemplate
             // Find our own binding.
             var flags = BindingFlags.IgnoreCase | BindingFlags.Static |
                         BindingFlags.Instance | BindingFlags.Public;
+            if (target.LimitType.IsAssignableTo(typeof(BinaryTemplateDuplicatedArray)))
+            {
+
+                var restrictions = target.Restrictions;
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(
+                                              target.Expression, target.LimitType));
+                var restrictionExpr = Expression.Property(Expression.Convert(target.Expression, typeof(BinaryTemplateDuplicatedArray)), "Value");
+                var currentValue = (target.Value as BinaryTemplateDuplicatedArray).Value;
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(restrictionExpr, currentValue.GetType()));
+                if (currentValue is IDynamicMetaObjectProvider)
+                    return (currentValue as IDynamicMetaObjectProvider).GetMetaObject(restrictionExpr).BindGetMember(this);
+            }
             var members = target.LimitType.GetMember(this.Name, flags);
+
             if (members.Length == 1)
             {
                 return new DynamicMetaObject(
@@ -232,10 +421,24 @@ namespace IronBinaryTemplate
                 deferArgs[indexes.Length + 1] = value;
                 return Defer(deferArgs);
             }
+            BindingRestrictions restrictions =
+                 RuntimeHelpers.GetTargetArgsRestrictions(target, indexes, false, false);
+
+            var indexObjects = indexes;
+
+            if (indexes.Length == 1 && (indexes[0].Value as BinaryTemplateVariable).Value != indexes[0].Value)
+            {
+                var restrictionExpr = Expression.Property(Expression.Convert(indexes[0].Expression, typeof(BinaryTemplateVariable)), "Value");
+                var currentValue = (indexes[0].Value as BinaryTemplateVariable).Value;
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(restrictionExpr, currentValue.GetType()));
+                indexObjects = new[] { new DynamicMetaObject(restrictionExpr, restrictions, currentValue) };
+
+
+            }
             // Find our own binding.
             Expression valueExpr = value.Expression;
-            BindingRestrictions restrictions =
-                 RuntimeHelpers.GetTargetArgsRestrictions(target, indexes, false);
+
+
             if (target.LimitType.IsArray)
             {
                 valueExpr = RuntimeHelpers.EnsureType(value, target.LimitType.GetElementType());
@@ -281,41 +484,42 @@ namespace IronBinaryTemplate
                 deferArgs[0] = target;
                 return Defer(deferArgs);
             }
+            BindingRestrictions restrictions = BindingRestrictions.GetTypeRestriction(target.Expression,
+                                                                   target.LimitType);
             // Find our own binding.
             if (target.LimitType.IsSubclassOf(typeof(Delegate)))
             {
                 var parms = target.LimitType.GetMethod("Invoke").GetParameters();
                     // Don't need to check if argument types match parameters.
                     // If they don't, users get an argument conversion error.
-                var callArgs = RuntimeHelpers.ConvertArguments(args, parms);
+                
+                var callArgs = RuntimeHelpers.ConvertArguments(args, parms, ref restrictions);
                 var expression = Expression.Invoke(
                     Expression.Convert(target.Expression, target.LimitType),
                     callArgs);
                 return new DynamicMetaObject(
                     RuntimeHelpers.EnsureObjectResult(expression),
-                    BindingRestrictions.GetTypeRestriction(target.Expression,
-                                                               target.LimitType));
+                    restrictions);
             } else if (target.LimitType.IsSubclassOf(typeof(MethodInfo)))
             {
                 MethodInfo method = target.Value as MethodInfo;
-
+                
                 Expression expression;
                 if (method.IsStatic)
                 {
-                    var callArgs = RuntimeHelpers.ConvertArguments(args, method.GetParameters());
+                    var callArgs = RuntimeHelpers.ConvertArguments(args, method.GetParameters(), ref restrictions);
                     expression = Expression.Call(method, callArgs);
                 }
                 else
                 {
                     var instance = RuntimeHelpers.EnsureType(args[0],method.DeclaringType);
-                    var callArgs = args.Length == 1 ? Array.Empty<Expression>() : RuntimeHelpers.ConvertArguments(args[1..^0], method.GetParameters());
+                    var callArgs = RuntimeHelpers.ConvertArguments(args[1..^0], method.GetParameters(), ref restrictions);
                     expression = Expression.Call(instance, method, callArgs);
                 }
                     
                     return new DynamicMetaObject(
                             RuntimeHelpers.EnsureObjectResult(expression),
-                            BindingRestrictions.GetTypeRestriction(target.Expression,
-                                                                   target.LimitType));
+                            restrictions);
             }
             return errorSuggestion ??
                 RuntimeHelpers.CreateThrow(
@@ -331,89 +535,5 @@ namespace IronBinaryTemplate
     
 
 
-    public class BTUnaryOperationBinder : UnaryOperationBinder
-    {
-        public new ExpressionType Operation { get; }
-        public BTUnaryOperationBinder(ExpressionType operation) : base(ExpressionType.Extension)
-        {
-            this.Operation = operation;
-        }
-
-        public override DynamicMetaObject FallbackUnaryOperation(DynamicMetaObject target, DynamicMetaObject errorSuggestion)
-        {
-            if (!target.HasValue)
-            {
-                return Defer(target);
-            }
-
-            var operation = this.Operation;
-            Expression expr = null;
-            Type type = target.LimitType;
-
-            if (operation == ExpressionType.Extension) //!
-            {
-                operation = ExpressionType.Not;
-                    
-                if (target.LimitType != typeof(bool) &&target.LimitType.IsPrimitive)
-                {
-                    return new DynamicMetaObject(
-                RuntimeHelpers.EnsureObjectResult(
-                  Expression.MakeBinary(
-                    ExpressionType.Equal,
-                    Expression.Convert(target.Expression, target.LimitType),
-                    Expression.Constant(0,target.LimitType))),
-                target.Restrictions.Merge(
-                    BindingRestrictions.GetTypeRestriction(
-                        target.Expression, target.LimitType)));
-                }
-
-            } else if (operation.ToString().EndsWith("Assign") && target.LimitType.IsSubclassOf(typeof(BinaryTemplateVariable)))
-            {
-                target.Restrictions.Merge(BindingRestrictions.GetInstanceRestriction(target.Expression, target.Value));
-                if (target.LimitType == typeof(LocalVariable))
-                {
-                    LocalVariable var = target.Value as LocalVariable;
-                    expr = Expression.Field(Expression.Convert(target.Expression, typeof(LocalVariable)), "value");
-                    type = var.Type.ClrType;
-                }
-                else
-                {
-                    return RuntimeHelpers.CreateThrow(target, new DynamicMetaObject[] { }, BindingRestrictions.Empty, typeof(InvalidOperationException), "Cannot assign non-local variable in template.");
-                }
-            }
-            expr = RuntimeHelpers.EnsureType(target, target.LimitType);
-
-
-            return new DynamicMetaObject(
-                RuntimeHelpers.EnsureObjectResult(
-                  Expression.MakeUnary(
-                    operation,
-                    expr, type)),
-            target.Restrictions.Merge(
-                    BindingRestrictions.GetTypeRestriction(
-                        target.Expression, target.LimitType)));
-        }
-    }
-
-    public class BTConvertBinder : ConvertBinder
-    {
-        public BTConvertBinder(Type type, bool @explicit) : base(type, @explicit)
-        {
-        }
-
-        public override DynamicMetaObject FallbackConvert(DynamicMetaObject target, DynamicMetaObject errorSuggestion)
-        {
-            if (!target.HasValue)
-                return Defer(target);
-
-            return new DynamicMetaObject(
-                RuntimeHelpers.EnsureType(target, this.Type),
-                target.Restrictions.Merge(
-                    BindingRestrictions.GetTypeRestriction(
-                        target.Expression, target.LimitType)));
-
-        }
-    }
-    
 
 }

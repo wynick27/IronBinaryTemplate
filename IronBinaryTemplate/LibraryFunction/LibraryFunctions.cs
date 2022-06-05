@@ -17,15 +17,7 @@ namespace IronBinaryTemplate
     }
     public static class LibraryFunctions
     {
-        //double ConvertBytesToDouble(uchar byteArray[] )
-        //float ConvertBytesToFloat(uchar byteArray[] )
-        //hfloat ConvertBytesToHFloat(uchar byteArray[] )
-        //    int ConvertDataToBytes(data_type value, uchar byteArray[] )
 
-        //  int DirectoryExists(string dir)
-        //   TFileList FindFiles(string dir, string filter)
-
-        //   int MakeDir(string dir)
         #region "Builtin Functions"
         public static long startof(BinaryTemplateVariable var)
         {
@@ -55,29 +47,43 @@ namespace IronBinaryTemplate
             {
                 if (result == null)
                     return false;
-                if (pathpart is string)
+                if (pathpart is string name)
                 {
-                    var indexer = RuntimeHelpers.GetStringIndexer(result.GetType());
-                    if (indexer == null)
-                        return false;
-                    result = indexer.GetValue(result, new[] { pathpart });
+                    if (scope is IBinaryTemplateScope ibtscope)
+                        result = ibtscope.GetVariable(name);
+                    else
+                    {
+                        var indexer = RuntimeHelpers.GetStringIndexer(result.GetType());
+                        if (indexer == null)
+                            return false;
+                        result = indexer.GetValue(result, new[] { pathpart });
+                    }
+                    
                 }
-                else if (pathpart is int)
+                else if (pathpart is int index)
                 {
-                    var indexer = RuntimeHelpers.GetIntIndexer(result.GetType());
-                    if (indexer == null)
-                        return false;
-                    result = indexer.GetValue(result, new[] { pathpart });
+                    if (scope is IBinaryTemplateArray btarray)
+                        result = btarray.GetVariable(index);
+                    else
+                    {
+                        var indexer = RuntimeHelpers.GetIntIndexer(result.GetType());
+                        if (indexer == null)
+                            return false;
+                        result = indexer.GetValue(result, new[] { pathpart });
+                    }
+                    
                 }
                 else
                     return false;
             }
+            if (result == null)
+                return false;
             return true;
         }
 
         public static bool function_exists(BinaryTemplateScope scope, string name)
         {
-            return scope.GetFunction(name) == null;
+            return scope.GetFunction(name) != null;
         }
         #endregion
 
@@ -99,8 +105,8 @@ namespace IronBinaryTemplate
         [TemplateCallable]
         public static int Printf(string format, params object[] arguments)
         {
-            
-            Console.WriteLine(Str(format,arguments));
+
+            Console.WriteLine(Str(format, arguments));
             return 0;
         }
         [TemplateCallable]
@@ -121,6 +127,50 @@ namespace IronBinaryTemplate
 
         }
 
+        #endregion
+
+        #region "IO Functions"
+
+        //    double ConvertBytesToDouble(byte[] byteArray)
+        //    {
+        //        if (byteArray.Length <)
+        //    }
+        //    float ConvertBytesToFloat(byte[] byteArray)
+        //    {
+
+        //    }
+
+        //#if NET5_0_OR_GREATER
+        //    Half ConvertBytesToHFloat(byte[] byteArray)
+        //    {
+
+        //    }
+        //#endif
+
+        //    int ConvertDataToBytes(BinaryTemplateVariable value, byte[] byteArray)
+        //    {
+
+        //    }
+
+        [TemplateCallable]
+        public static bool DirectoryExists(string dir)
+        {
+            return Directory.Exists(dir);
+        }
+
+        //class TFileList
+        //{
+        //    int filecount;
+        //    int dircount;
+        //    int[] files;
+
+        //}
+        //TFileList FindFiles(string dir, string filter)
+        //{
+
+        //}
+
+        //   int MakeDir(string dir)
         #endregion
 
         #region "Math Functions"
@@ -329,31 +379,43 @@ namespace IronBinaryTemplate
 
         //int IsCharWhitespace(char c )
         [TemplateCallable]
-        public static bool IsCharWhitespaceW(char c )
+        public static bool IsCharWhitespaceW(char c)
         {
             return char.IsWhiteSpace(c);
         }
         [TemplateCallable]
         public static int Memcmp(byte[] s1, byte[] s2, int n)
         {
-            throw new NotImplementedException();
+            int result = 0;
+            for (int i = 0; i < Math.Min(Math.Min(s1.Length, s2.Length), n); i++)
+            {
+                result = s1[i] - s2[i];
+                if (result != 0)
+                    return result;
+            }
+            return result;
         }
         //Compares the first n bytes of s1 and s2.Returns a value less than zero if s1 is less than s2, zero if they are equal, or a value greater than zero if s1 is greater than s2.
         [TemplateCallable]
         public static void Memcpy(byte[] dest, byte[] src, int n, int destOffset = 0, int srcOffset = 0)
         {
-            throw new NotImplementedException();
+            int n1 = src.Length - srcOffset;
+            int n2 = dest.Length - destOffset;
+            if (n1 < 0 || n2 < 0 || n < 0)
+                return;
+            n = Math.Min(Math.Min(n1, n2), n);
+            Array.Copy(src, srcOffset, dest, destOffset, n);
         }
         //Copies a block of n bytes from src to dest.If srcOffset is not zero, the bytes are copied starting from the srcOffset byte in src.If destOffset is not zero, the bytes are copied to dest starting at the byte destOffset. See the WMemcpy function for copying wchar_t data.
         //Requires 010 Editor v6.0 or higher for the destOffset and srcOffset parameters.
         [TemplateCallable]
-        public static void Memset(byte[] s, int c, int n)
+        public static void Memset(byte[] s, byte c, int n)
         {
-            throw new NotImplementedException();
+            for (int i = 0; i < Math.Min(s.Length, n); i++)
+            {
+                s[i] = c;
+            }
         }
-        //Sets the first n bytes of s to the byte c.
-
-
 
         //string OleTimeToString(OLETIME ot, char format[] = "MM/dd/yyyy hh:mm:ss")
         //Converts the given OLETIME into a string and returns the results.By default the time will be in the format 'MM/dd/yyyy hh:mm:ss' but other formats can be used as described in the GetCurrentDateTime function.Click here for more information on the OLETIME type and see the FileTimeToString function for an example of using SScanf to parse the resulting string. 
@@ -367,11 +429,16 @@ namespace IronBinaryTemplate
         {
             try
             {
-                return Regex.IsMatch(str, regex) ? 1 : 0;
+                var match = Regex.Match(str, regex);
+                return match.Success && match.Index == 0 ? 1 : 0;
+            }
+            catch (ArgumentException argex)
+            {
+                return -1;
             }
             catch (Exception)
             {
-                return -1;
+                return 0;
             }
         }
 
@@ -383,15 +450,19 @@ namespace IronBinaryTemplate
             {
                 var match = Regex.Match(str, regex);
                 matchSize = match.Length;
-                return match.Index;
+                return match.Success ? match.Index : -1;
             }
             catch (Exception)
             {
-                return -1;
+                return -2;
             }
         }
 
-        //int SPrintf( char buffer[], const char format[] [, argument, ... ] )
+        [TemplateCallable]
+        public static int SPrintf(BinaryTemplateString buffer, string format, params object[] argument)
+        {
+            return 0;
+        }
         //Performs a Printf starting from format and places the result into buffer. See Printf for more information. This function is similar to the Str function. 
 
         //￼
@@ -467,18 +538,18 @@ namespace IronBinaryTemplate
         //Requires 010 Editor v12.0 or higher. 
 
         //￼
-
-       // void Strcat(byte[] dest,  byte[] src)
-       // {
-
-       // }
+        [TemplateCallable]
+        public static void Strcat(BinaryTemplateString dest, BinaryTemplateString src)
+        {
+            dest += src;
+        }
         //Appends the characters from src to the end of the string dest. The string may be resized if necessary. The += operator can also be used for a similar result. 
 
         //￼
-
-        public static int Strchr(byte[] s, char c )
+        [TemplateCallable]
+        public static int Strchr(byte[] s, char c)
         {
-            for (int i = 0;i < s.Length;i++)
+            for (int i = 0; i < s.Length; i++)
             {
                 if (s[i] == c)
                     return i;
@@ -491,9 +562,16 @@ namespace IronBinaryTemplate
 
         //￼
         [TemplateCallable]
-        public static int Strcmp(byte[] s1, byte[] s2 )
+        public static int Strcmp(byte[] s1, byte[] s2)
         {
-            return 0;
+            int result = 0;
+            for (int i = 0; i < Math.Min(s1.Length, s2.Length); i++)
+            {
+                result = s1[i] - s2[i];
+                if (result != 0 || s1[i]==0 || s2[i]==0)
+                    return result;
+            }
+            return result;
         }
         //Compares the one string to another. Returns a value less than zero if s1 is less than s2, zero if they are equal, or a value greater than zero if s1 is greater than s2. 
 
@@ -561,8 +639,11 @@ namespace IronBinaryTemplate
         //Requires 010 Editor v4.0 or higher. 
 
         //￼
-
-        //wstring StringToWString( const char str[], int srcCharSet = CHARSET_ANSI )
+        [TemplateCallable]
+        public static string StringToWString(BinaryTemplateString src, int srcCharSet = 0) // CHARSET_ANSI )
+        {
+            return src.ToString();
+        }
         //Converts the given string str into a wide (unicode) string.str is assumed to be an ANSI string but other character sets can be specified using the srcCharSet parameter(see the ConvertString function for a list of character set constants).See Strings for information on wide strings and note that wstring and wchar_t[] are equivalent.
         //Requires 010 Editor v3.1 or higher.
         //Requires 010 Editor v4.0 or higher for the srcCharSet parameter.
@@ -572,7 +653,7 @@ namespace IronBinaryTemplate
         [TemplateCallable]
         public static int Strlen(byte[] s)
         {
-            for (int i=0;i<s.Length;i++)
+            for (int i = 0; i < s.Length; i++)
             {
                 if (s[i] == 0)
                     return i;
@@ -580,8 +661,18 @@ namespace IronBinaryTemplate
             return s.Length;
         }
 
-
-        //int Strncmp( const char s1[], const char s2[], int n )
+        [TemplateCallable]
+        public static int Strncmp(byte[] s1, byte[] s2, int n)
+        {
+            int result = 0;
+            for (int i = 0; i < Math.Min(Math.Min(s1.Length, s2.Length),n); i++)
+            {
+                result = s1[i] - s2[i];
+                if (result != 0 || s1[i] == 0 || s2[i] == 0)
+                    return result;
+            }
+            return result;
+        }
         //Similar to Strcmp, except that no more than n characters are compared. 
 
         //￼
@@ -689,8 +780,12 @@ namespace IronBinaryTemplate
         //Identical to WStrcmp except the strings are compared without case sensitivity. 
         //Requires 010 Editor v3.1 or higher. 
 
-        //char[]
-        //WStringToString(string str, int destCharSet=CHARSET_ANSI )
+        //Todo Add charset support
+        [TemplateCallable]
+        public static BinaryTemplateString WStringToString(string str, int destCharSet=0) //CHARSET_ANSI )
+        {
+            return new BinaryTemplateString(str);
+        }
         //Converts the given wide string str by default into an ANSI string and returns it. The string can be converted to other character sets using the destCharSet parameter(see the ConvertString function for a list of character set constants).Note that not all characters can be successfully converted from wide characters to other character sets and any characters that cannot be converted will be replaced with the '?' character. See Strings for information on wide strings and note that wstring and wchar_t[]
         //are equivalent.
         //Requires 010 Editor v3.1 or higher. 
@@ -707,7 +802,11 @@ namespace IronBinaryTemplate
 
         //￼
 
-        //int WStrncmp(string s1, string s2, int n )
+        [TemplateCallable]
+        public static int WStrncmp(string s1, string s2, int n )
+        {
+            return string.Compare(s1, 0, s2, 0, n);
+        }
         //Similar to WStrcmp, except that at most n characters are compared between the two strings. 
         //Requires 010 Editor v3.1 or higher. 
 
@@ -719,19 +818,30 @@ namespace IronBinaryTemplate
 
         //￼
 
-        //int WStrnicmp(string s1, string s2, int n )
+        [TemplateCallable]
+        public static int WStrnicmp(string s1, string s2, int n )
+        {
+            return string.Compare(s1,0,s2,0,n,true);
+        }
         //Similar to WStrcmp except that at most n characters are compared and the characters are compared without case sensitivity. 
         //Requires 010 Editor v3.1 or higher. 
 
-        //￼
 
-        //int WStrstr(string s1, string s2)
+        [TemplateCallable]
+        public static int WStrstr(string s1, string s2)
+        {
+            return s1.IndexOf(s2);
+        }
         //Searches through the wide string s1 for the first occurrence of the string s2. If the string is found, the index of the first matching character is returned, otherwise -1 is returned. 
         //Requires 010 Editor v3.1 or higher. 
 
         //￼
 
-        //wchar_t[] WSubStr( const wchar_t str[], int start, int count = -1)
+        [TemplateCallable]
+        public static string WSubStr(string str, int start, int count = -1)
+        {
+            return count == -1 ? str.Substring(start) : str.Substring(start, count);
+        }
         //Returns a wide string containing count characters from str starting at the index start. If count is -1, all the characters from the start index to the end of the string are returned. 
         //Requires 010 Editor v3.1 or higher. 
 
@@ -742,6 +852,7 @@ namespace IronBinaryTemplate
         [TemplateCallable]
         public static long Checksum(int algorithm, long start = 0, long size = 0, long crcPolynomial = -1, long crcInitValue = -1)
         {
+            return 0;
             throw new NotImplementedException();
         }
         //Runs a simple checksum on a file and returns the result as a int64.The algorithm can be one of the following constants: 
