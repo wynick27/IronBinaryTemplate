@@ -23,6 +23,7 @@ namespace IronBinaryTemplate
         public Dictionary<string, TypeDefinition> BuiltinTypes { get; }
         public List<string> IncludeDirs { get;  }
 
+
         public BinaryTemplate()
         {
             IncludeDirs = new List<string>();
@@ -31,6 +32,7 @@ namespace IronBinaryTemplate
             BuiltinTypes.Add("DOSTIME", BasicType.FromClrType(typeof(ushort)));
             BuiltinTypes.Add("DOSDATE", BasicType.FromClrType(typeof(ushort)));
             BuiltinTypes.Add("time_t", BasicType.FromClrType(typeof(uint)));
+            BuiltinTypes.Add("time64_t", BasicType.FromClrType(typeof(ulong)));
             BuiltinTypes.Add("FILETIME", BasicType.FromClrType(typeof(ulong)));
             BuiltinTypes.Add("GUID", BasicType.FromClrType(typeof(byte)).GetArrayType(16));
             BuiltinFunctions.Add("sizeof", new ExternalFunction(typeof(LibraryFunctions).GetMethod("sizeof")));
@@ -170,12 +172,13 @@ namespace IronBinaryTemplate
             return true;
         }
 
-        public void RegisterClrFunctions(Type type, bool overwrite = true, string prefix="")
+        public void RegisterClrFunctions(Type type, bool overwrite = true)
         {
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
             {
-                if (method.GetCustomAttribute<TemplateCallableAttribute>() != null)
-                    RegisterClrFunction(prefix + method.Name, method, overwrite);
+                TemplateCallableAttribute attr;
+                if ((attr = method.GetCustomAttribute<TemplateCallableAttribute>()) != null)
+                    RegisterClrFunction(string.IsNullOrEmpty(attr.FunctionName) ? method.Name : attr.FunctionName, method, overwrite);
             }
         }
 

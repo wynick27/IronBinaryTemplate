@@ -1,10 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace IronBinaryTemplate
 {
-    public interface IBinaryTemplateScope
+    public interface IBinaryTemplateScope: IReadOnlyDictionary<string,BinaryTemplateVariable>
     {
         BinaryTemplateVariable GetVariable(string name);
+
 
         object this[string name]
         {
@@ -28,9 +30,8 @@ namespace IronBinaryTemplate
             }
         }
     }
-    public interface IBinaryTemplateArray
+    public interface IBinaryTemplateArray : IReadOnlyList<BinaryTemplateVariable>
     {
-        int Length { get; }
         BinaryTemplateVariable GetVariable(int index);
 
         object this[int index]

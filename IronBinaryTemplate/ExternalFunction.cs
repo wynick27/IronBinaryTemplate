@@ -9,7 +9,29 @@ namespace IronBinaryTemplate
 
     public class TemplateCallableAttribute : Attribute
     {
+        public TemplateCallableAttribute(string name = "")
+        {
+            FunctionName = name;
+        }
+        public string FunctionName { get; }
+    }
 
+    public class TemplateVariableCreatingCallbackAttribute : Attribute
+    {
+        public TemplateVariableCreatingCallbackAttribute(string name = "")
+        {
+            AttributeName = name;
+        }
+        public string AttributeName { get; }
+    }
+
+    public class TemplateVariableCreatedCallbackAttribute : Attribute
+    {
+        public TemplateVariableCreatedCallbackAttribute(string name = "")
+        {
+            AttributeName = name;
+        }
+        public string AttributeName { get; }
     }
 
     public interface ICallableFunction
@@ -103,11 +125,13 @@ namespace IronBinaryTemplate
             var scopeExpr = scope.ScopeArg;
             if (requirethis)
             {
-                
+
                 if (method.DeclaringType.IsAssignableFrom(typeof(BinaryTemplateContext)) && scope.Context != null)
                     converted.Add(scope.Context);
-                else if (scopeExpr !=null && method.DeclaringType.IsAssignableFrom(scopeExpr.Type))
+                else if (scopeExpr != null && method.DeclaringType.IsAssignableFrom(scopeExpr.Type))
                     converted.Add(scopeExpr);
+                else if (scopeExpr != null)
+                    converted.Add(Expression.Call(scope.Context, typeof(BinaryTemplateContext).GetMethod("GetService"), Expression.Constant(method.DeclaringType)));
                 else
                     throw new InvalidOperationException($"Function requires an object instance of type {method.DeclaringType}.");
             }

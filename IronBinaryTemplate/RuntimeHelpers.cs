@@ -273,8 +273,8 @@ namespace IronBinaryTemplate
                 paramArray = ps[^1];
                 paramArgs = new List<Expression>();
             }
-            Debug.Assert(args.Length == ps.Length || (paramArray != null && args.Length >= ps.Length-1),
-                         "Internal: args are not same len as params?!");
+            //Debug.Assert(args.Length == ps.Length || (paramArray != null && args.Length >= ps.Length-1),
+            //             "Internal: args are not same len as params?!");
             List<Expression> callArgs = new List<Expression>();
             for (int i = 0; i < args.Length; i++)
             {

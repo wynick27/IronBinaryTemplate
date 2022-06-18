@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Dynamic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -52,7 +54,7 @@ namespace IronBinaryTemplate
 
         BinaryTemplateContext _context;
         public override BinaryTemplateContext Context { get => _context; }
-        public override object Value { get => Context.ReadBasicType(Type, state); set => throw new NotImplementedException(); }
+        public override object Value { get => Context.ReadBasicType(Type, state); set => Context.WriteBasicType(Type, state, value); }
 
         public ScalarVariable(BinaryTemplateContext context, TypeDefinition type)
         {
@@ -83,10 +85,11 @@ namespace IronBinaryTemplate
 
         public override long? Size => Type.Size ?? Array?.Length * ElementType.Size;
 
-        public int Length => Array.Length;
+        public int Count => Array.Length;
 
         public override object Value { get => Array; set => throw new NotImplementedException(); }
 
+        public BinaryTemplateVariable this[int index] => new ArrayProxyVariable<T>(this, index);
 
         public BinaryTemplateWrapperArray(BinaryTemplateContext context, TypeDefinition type, BinaryTemplateReaderState state)
         {
@@ -115,6 +118,18 @@ namespace IronBinaryTemplate
         public BinaryTemplateVariable GetVariable(int index)
         {
             return new ArrayProxyVariable<T>(this, index);
+        }
+
+        public IEnumerator<BinaryTemplateVariable> GetEnumerator()
+        {
+            for (int i=0;i<Array.Length;i++)
+                yield return new ArrayProxyVariable<T>(this, i);
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            for (int i = 0; i < Array.Length; i++)
+                yield return new ArrayProxyVariable<T>(this, i);
         }
     }
 
@@ -154,6 +169,10 @@ namespace IronBinaryTemplate
         public override object Value { get => value; set => this.value = value; }
     }
 
+    /// <summary>
+    /// Strong typed local variable.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
     public class LocalVariable<T> : BinaryTemplateVariable
     {
         T value;
@@ -198,7 +217,9 @@ namespace IronBinaryTemplate
         protected BinaryTemplateContext _context;
         public override BinaryTemplateContext Context  => _context;
 
-        public int Length => Variables.Count;
+        public int Count => Variables.Count;
+
+        BinaryTemplateVariable IReadOnlyList<BinaryTemplateVariable>.this[int index] => Variables[index];
 
         public BinaryTemplateArray(BinaryTemplateContext context, TypeDefinition type, BinaryTemplateReaderState state) : base(type, state.Position, false)
         {
@@ -226,6 +247,19 @@ namespace IronBinaryTemplate
         {
             return Variables[index];
         }
+
+        public IEnumerator<BinaryTemplateVariable> GetEnumerator()
+        {
+            return Variables.GetEnumerator();
+        }
+
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            foreach (var elem in Variables)
+                yield return elem;
+        }
+
     }
 
     /// <summary>
@@ -244,11 +278,13 @@ namespace IronBinaryTemplate
 
         public override long? Size => _elemSize * _length;
 
-        public int Length => _length;
+        public int Count => _length;
 
         public override long? Start => _start;
 
-        public override object Value { get => this; set => throw new NotImplementedException(); }
+        public override object Value { get => this; set => throw new NotSupportedException(); }
+
+        public BinaryTemplateVariable this[int index] => GetVariable(index);
 
         public BinaryTemplateLazyArray(BinaryTemplateContext context, TypeDefinition type, long start, int length, object[] args)
         {
@@ -285,12 +321,23 @@ namespace IronBinaryTemplate
             value.Name = $"{this.Name}[{index}]";
             value.Parent = this.Parent;
             _cache = value;
+            _cachindex = index;
             Context.Position = pos;
             
             return value;
         }
 
+        public IEnumerator<BinaryTemplateVariable> GetEnumerator()
+        {
+            for (int i=0;i<_length;i++)
+                yield return GetVariable(i);
+        }
 
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            for (int i = 0; i < _length; i++)
+                yield return GetVariable(i);
+        }
     }
 
     public class BinaryTemplateScope : BinaryTemplateVariable, IDynamicMetaObjectProvider, IBinaryTemplateScope
@@ -313,7 +360,15 @@ namespace IronBinaryTemplate
 
         public override long? Start => _start;
 
-        public override object Value { get => this; set => throw new NotImplementedException(); }
+        public override object Value { get => this; set => throw new NotSupportedException(); }
+
+        public IEnumerable<string> Keys => (Variables as IDictionary<string,BinaryTemplateVariable>).Keys;
+
+        public IEnumerable<BinaryTemplateVariable> Values => (Variables as IDictionary<string, BinaryTemplateVariable>).Values;
+
+        public int Count => Variables.Count;
+
+        BinaryTemplateVariable IReadOnlyDictionary<string, BinaryTemplateVariable>.this[string key] => Variables[key];
 
         public BinaryTemplateScope(TypeDefinition type, long start, bool isUnion)
         {
@@ -414,7 +469,7 @@ namespace IronBinaryTemplate
         {
             if (!TryGetVariable(name, out BinaryTemplateVariable var))
                 throw new MemberAccessException(name);
-            //Console.WriteLine($"{Context.Position} GetVariable {name} = {var.Value}");
+   //         Console.WriteLine($"{Context.Position} GetVariable {name} = {var.Value}");
 
             if (var is IBinaryTemplateScope || var is IBinaryTemplateArray)
                 return var;
@@ -427,7 +482,7 @@ namespace IronBinaryTemplate
         {
             if (!TryGetVariable(name, out BinaryTemplateVariable var))
                 throw new MemberAccessException(name);
-           // Console.WriteLine($"{Context.Position} SetVariable {name} = {value}");
+  //          Console.WriteLine($"{Context.Position} SetVariable {name} = {value}");
             var.Value = value;
         }
 
@@ -441,6 +496,26 @@ namespace IronBinaryTemplate
             if (Parent != null)
                 return Parent.GetFunction(name);
             return null;
+        }
+
+        public bool ContainsKey(string key)
+        {
+            return Variables.Contains(key);
+        }
+
+        public bool TryGetValue(string key, [MaybeNullWhen(false)] out BinaryTemplateVariable value)
+        {
+            return Variables.TryGetValue(key, out value);
+        }
+
+        public IEnumerator<KeyValuePair<string, BinaryTemplateVariable>> GetEnumerator()
+        {
+            return (Variables as IDictionary<string, BinaryTemplateVariable>).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return Variables.GetEnumerator();
         }
 
         public object this[string name]
@@ -524,18 +599,27 @@ namespace IronBinaryTemplate
     public class BinaryTemplateVariableScope : IBinaryTemplateScope
     {
         public BinaryTemplateVariable Variable { get; }
-        public Dictionary<string,object> Arguments { get; }
+        public VariableCollection Arguments { get; }
+
+        public IEnumerable<string> Keys => (Arguments as IDictionary<string,BinaryTemplateVariable>).Keys;
+
+        public IEnumerable<BinaryTemplateVariable> Values => (Arguments as IDictionary<string, BinaryTemplateVariable>).Values;
+
+        public int Count => Arguments.Count;
+
+        public BinaryTemplateVariable this[string key] => Arguments[key];
+
         public BinaryTemplateVariableScope(BinaryTemplateVariable var)
         {
             Variable = var;
-            Arguments = new Dictionary<string, object>();
+            Arguments = new VariableCollection();
         }
         public BinaryTemplateVariable GetVariable(string name)
         {
             if (name == "this")
                 return Variable;
-            else if (Arguments.TryGetValue(name, out object obj))
-                return new LocalVariable(name, TypeDefinition.FromClrType(obj.GetType()), obj);
+            else if (Arguments.TryGetValue(name, out BinaryTemplateVariable var))
+                return var;
             else if (Variable is IBinaryTemplateScope btscope)
             {
                 var variable = btscope.GetVariable(name);
@@ -543,6 +627,32 @@ namespace IronBinaryTemplate
                     return variable;
             }
             return Variable.Parent.GetVariable(name);
+        }
+
+        public BinaryTemplateVariableScope AddArgument(string name, object obj)
+        {
+            Arguments.Add(new LocalVariable(name, TypeDefinition.FromClrType(obj.GetType()), obj));
+            return this;
+        }
+
+        public bool ContainsKey(string key)
+        {
+            return Arguments.Contains(key);
+        }
+
+        public bool TryGetValue(string key, [MaybeNullWhen(false)] out BinaryTemplateVariable value)
+        {
+            return Arguments.TryGetValue(key, out value);
+        }
+
+        public IEnumerator<KeyValuePair<string, BinaryTemplateVariable>> GetEnumerator()
+        {
+            return (Arguments as IDictionary<string,BinaryTemplateVariable>) .GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return Arguments.GetEnumerator();
         }
     }
 
@@ -554,10 +664,11 @@ namespace IronBinaryTemplate
 
         public override long? Size => LastVariable.Size;
 
-        public int Length => Variables.Count;
+        public int Count => Variables.Count;
 
         public override object Value { get => LastVariable.Value; set => LastVariable.Value = value; }
 
+        public BinaryTemplateVariable this[int index] => Variables[index];
 
         public BinaryTemplateDuplicatedArray()
         {
@@ -573,6 +684,16 @@ namespace IronBinaryTemplate
         public BinaryTemplateVariable GetVariable(int index)
         {
             return Variables[index];
+        }
+
+        public IEnumerator<BinaryTemplateVariable> GetEnumerator()
+        {
+            return Variables.GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return Variables.GetEnumerator();
         }
     }
 

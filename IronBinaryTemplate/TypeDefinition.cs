@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Dynamic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -388,6 +390,12 @@ namespace IronBinaryTemplate
         public override bool IsBasicType => true;
         public override bool IsFixedSize => true;
 
+        public IEnumerable<string> Keys => (Values as IDictionary<string, BinaryTemplateVariable>).Keys;
+
+        public int Count => Values.Count;
+
+        public BinaryTemplateVariable this[string key] => Values[key];
+
 
         public EnumDefinition(string name, Type clrType = null)
         {
@@ -470,6 +478,8 @@ namespace IronBinaryTemplate
 
         public Expression Context => null;
 
+        IEnumerable<BinaryTemplateVariable> IReadOnlyDictionary<string, BinaryTemplateVariable>.Values => (Values as IDictionary<string, BinaryTemplateVariable>).Values;
+
         public ParameterExpression GetParameter(string name)
         {
             if (name == "$scope")
@@ -480,6 +490,26 @@ namespace IronBinaryTemplate
         public ParameterExpression[] GetParameterList()
         {
             return new[] { ScopeParam};
+        }
+
+        public bool ContainsKey(string key)
+        {
+            return Values.Contains(key);
+        }
+
+        public bool TryGetValue(string key, [MaybeNullWhen(false)] out BinaryTemplateVariable value)
+        {
+            return Values.TryGetValue(key, out value);
+        }
+
+        public IEnumerator<KeyValuePair<string, BinaryTemplateVariable>> GetEnumerator()
+        {
+            return (Values as IDictionary<string, BinaryTemplateVariable>).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return Values.GetEnumerator();
         }
     }
 
@@ -969,6 +999,14 @@ namespace IronBinaryTemplate
 
         public Action<BinaryTemplateContext, IBinaryTemplateScope> CompiledFunction { get; private set; }
 
+        public IEnumerable<string> Keys => (EnumConsts as IDictionary<string,BinaryTemplateVariable>).Keys;
+
+        public IEnumerable<BinaryTemplateVariable> Values => (EnumConsts as IDictionary<string, BinaryTemplateVariable>).Values;
+
+        public int Count => EnumConsts.Count;
+
+        public BinaryTemplateVariable this[string key] => EnumConsts[key];
+
         public BinaryTemplateRootDefinition(BinaryTemplate runtime) : base()
         {
             Runtime = runtime;
@@ -1119,6 +1157,26 @@ namespace IronBinaryTemplate
             }
             else
                 Typedefs.Add(deftype);
+        }
+
+        public bool ContainsKey(string key)
+        {
+            return EnumConsts.Contains(key);
+        }
+
+        public bool TryGetValue(string key, [MaybeNullWhen(false)] out BinaryTemplateVariable value)
+        {
+            return EnumConsts.TryGetValue(key, out value);
+        }
+
+        public IEnumerator<KeyValuePair<string, BinaryTemplateVariable>> GetEnumerator()
+        {
+            return (EnumConsts as IDictionary<string,BinaryTemplateVariable>).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return EnumConsts.GetEnumerator();
         }
     }
 

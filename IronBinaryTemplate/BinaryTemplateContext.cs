@@ -7,10 +7,15 @@ using System.Text;
 
 namespace IronBinaryTemplate
 {
-    public class BinaryTemplateContext
+    public class BinaryTemplateContext : IServiceProvider
     {
         List<Stream> Files;
         BinaryTemplateReader CurrentReader;
+        Dictionary<Type, object> Services;
+
+
+        public event Action<VariableDeclaration> VariableCreating;
+        public event Action<VariableDeclaration, BinaryTemplateVariable> VariableCreated;
 
         protected static Dictionary<Type, Func<BinaryTemplateContext, object>> readfunctionsbyte = new Dictionary<Type, Func<BinaryTemplateContext, object>>()
         {
@@ -38,9 +43,23 @@ namespace IronBinaryTemplate
             { typeof(byte), (ctx,size) => ctx.CurrentReader.ReadByte(size) },
         };
 
+        internal void WriteBasicType(TypeDefinition type, BinaryTemplateReaderState state, object value)
+        {
+            throw new NotImplementedException();
+        }
 
-
-        public long Position { get => CurrentReader.BaseStream.Position; set => CurrentReader.BaseStream.Position = value; }
+        public long Position 
+        {
+            get
+            {
+                return _statevalid ? _state.Position : CurrentReader.BaseStream.Position;
+            }
+            set
+            {
+                CurrentReader.BaseStream.Position = value;
+                _statevalid = false;
+            }
+        }
 
         public BinaryTemplateContext()
         {
@@ -61,7 +80,7 @@ namespace IronBinaryTemplate
 
         public Stream AddFile(string path, bool canwrite = false, bool setcurrent = true)
         {
-            Stream s = File.Open(path, FileMode.Open, canwrite ? FileAccess.ReadWrite : FileAccess.Read);
+            Stream s = File.Open(path, FileMode.Open, canwrite ? FileAccess.ReadWrite : FileAccess.Read, FileShare.Read);
             
             Files.Add(s);
             if (setcurrent)
@@ -71,23 +90,60 @@ namespace IronBinaryTemplate
 
         public BinaryTemplateReaderState MapType(TypeDefinition type, int length = 1)
         {
-            return type.IsBitfield ? CurrentReader.SkipBits(type.BitSize.Value * length, type.Size.Value) : CurrentReader.SkipBytes(type.Size.Value * length);
+           // System.Console.WriteLine($"{type} {Position} {CurrentReader.Position}");
+            return type.IsBitfield ? SkipBits(type.BitSize.Value * length, type.Size.Value) : SkipBytes(type.Size.Value * length);
         }
 
+
+        protected BinaryTemplateReaderState _state;
+        protected bool _statevalid;
 
         public BinaryTemplateReaderState SkipBytes(long bytes)
         {
-            return CurrentReader.SkipBytes(bytes);
+            if (!_statevalid)
+            {
+                _state = CurrentReader.SaveState();
+                _statevalid = true;
+            }
+            var result = _state.Clone();
+            _state.Position += bytes;
+            return result;
+            //return CurrentReader.SkipBytes(bytes);
         }
 
 
-        public BinaryTemplateReaderState SkipBits(long bytes)
+        public BinaryTemplateReaderState SkipBits(long bits,int bytecount)
         {
-            return CurrentReader.SkipBits(bytes);
+            if (!_statevalid)
+            {
+                _state = CurrentReader.SaveState();
+                _statevalid = true;
+            }
+
+            if (_state.PaddedMode)
+            {
+                if (_state.ByteCount != bytecount)
+                {
+                    _state.Position += _state.ByteCount;
+                    _state.BitPosition = 0;
+                    _state.ByteCount = (byte)bytecount;
+                }
+
+            }
+            else
+                bytecount = 1;
+
+            _state.Position += ((_state.BitPosition + bits) / (bytecount * 8)) * bytecount;
+            _state.BitPosition = (int)(_state.BitPosition + bits) % (bytecount * 8);
+            return _state.Clone();
+            // return CurrentReader.SkipBits(bits, bytesize);
         }
 
         public object ReadBasicType(TypeDefinition type, BinaryTemplateReaderState state, bool restorestate=true)
         {
+            System.Console.WriteLine($"{type} {state.Position} {state.BitPosition}");
+           if (!restorestate)
+                _statevalid = false;
             var curstate = restorestate ? CurrentReader.SaveState() : null;
             CurrentReader.LoadState(state);
             object result;
@@ -163,11 +219,13 @@ namespace IronBinaryTemplate
         protected virtual void BigEndian()
         {
             CurrentReader.LittleEndian = false;
+            _statevalid = false;
         }
         [TemplateCallable]
         protected virtual void LittleEndian()
         {
             CurrentReader.LittleEndian = true;
+            _statevalid = false;
         }
         [TemplateCallable]
         protected virtual bool IsBigEndian()
@@ -183,11 +241,13 @@ namespace IronBinaryTemplate
         protected virtual void BitfieldDisablePadding()
         {
             CurrentReader.PaddedMode = false;
+            _statevalid = false;
         }
         [TemplateCallable]
         protected virtual void BitfieldEnablePadding()
         {
             CurrentReader.PaddedMode = true;
+            _statevalid = false;
         }
         [TemplateCallable]
         protected virtual bool IsBitfieldLeftToRight()
@@ -203,11 +263,13 @@ namespace IronBinaryTemplate
         protected virtual void BitfieldLeftToRight()
         {
             CurrentReader.BitfieldRightToLeft = false;
+            _statevalid = false;
         }
         [TemplateCallable]
         protected virtual void BitfieldRightToLeft()
         {
             CurrentReader.BitfieldRightToLeft = true;
+            _statevalid = false;
         }
         [TemplateCallable]
         protected virtual bool FEof()
@@ -222,6 +284,8 @@ namespace IronBinaryTemplate
         [TemplateCallable]
         protected virtual long FTell()
         {
+            if (_statevalid)
+                return _state.Position;
             return CurrentReader.BaseStream.Position;
         }
         [TemplateCallable]
@@ -229,6 +293,7 @@ namespace IronBinaryTemplate
         {
             try
             {
+                _statevalid = false;
                 CurrentReader.BaseStream.Position = pos;
                 return 0;
             }
@@ -243,6 +308,7 @@ namespace IronBinaryTemplate
         {
             try
             {
+                _statevalid = false;
                 CurrentReader.BaseStream.Position += skip;
                 return 0;
             }
@@ -346,7 +412,7 @@ namespace IronBinaryTemplate
             return value;
         }
 #endif
-            [TemplateCallable]
+        [TemplateCallable]
         protected virtual int ReadInt(long pos = -1)
         {
             var state = CurrentReader.SaveState();
@@ -439,6 +505,7 @@ namespace IronBinaryTemplate
 
         public byte[] ReadBytes(int length)
         {
+            _statevalid = false;
             return CurrentReader.ReadBytes(length);
         }
 
@@ -450,6 +517,25 @@ namespace IronBinaryTemplate
         public void LoadState(BinaryTemplateReaderState state)
         {
             CurrentReader.LoadState(state);
+        }
+
+        public object GetService(Type serviceType)
+        {
+            if (Services.TryGetValue(serviceType, out object value))
+                return value;
+            return null;
+        }
+
+        public void BeginNewVariable(VariableDeclaration variableDeclaration)
+        {
+            if (VariableCreating != null)
+                VariableCreating.Invoke(variableDeclaration);
+        }
+
+        public void EndNewVariable(VariableDeclaration variableDeclaration, BinaryTemplateVariable variable)
+        {
+            if (VariableCreated != null)
+                VariableCreated.Invoke(variableDeclaration, variable);
         }
     }
 }

@@ -734,6 +734,7 @@ namespace IronBinaryTemplate
         {
             var typedef = GetTypeDefinition(arrayarguments);
             var btscope = scope as BinaryTemplateScope;
+            context.BeginNewVariable(this);
             if (btscope != null)
                 btscope.BeginNewVariable(Name);
             BinaryTemplateVariable variable;
@@ -746,6 +747,7 @@ namespace IronBinaryTemplate
             if (btscope != null)
                 btscope.EndNewVariable(variable);
             variable.CustomAttributes = this.CustomAttributes;
+            context.EndNewVariable(this, variable);
             return variable;
 
         }

@@ -13,6 +13,11 @@ namespace IronBinaryTemplate
         public bool RightToLeft;
         public byte ByteCount;
         public int BitPosition;
+
+        public BinaryTemplateReaderState Clone()
+        {
+            return (BinaryTemplateReaderState)this.MemberwiseClone();
+        }
     }
 
     public class BinaryTemplateReader: BinaryReader
