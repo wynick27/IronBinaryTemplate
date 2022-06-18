@@ -147,13 +147,13 @@ declarationSpecifier
     ;
 
 initDeclaratorList
-    :   initDeclarator customAttributeSpecifier?
-    |   initDeclaratorList ',' initDeclarator customAttributeSpecifier?
+    :   initDeclarator 
+    |   initDeclaratorList ',' initDeclarator 
     ;
 
 initDeclarator
-    :   declarator
-    |   declarator '=' initializer
+    :   declarator customAttributeSpecifier?
+    |   declarator  customAttributeSpecifier? '=' initializer
     ;
 
 

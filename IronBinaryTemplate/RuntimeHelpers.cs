@@ -117,14 +117,14 @@ namespace IronBinaryTemplate
                             throw new ArgumentException($"Arguments {param.Name} must be lvalue.");
                         }
                     }
-                   // else if (param.Type == arguments[i].Type)
-                  //  {
-                 //       converted.Add(RuntimeHelpers.EnsureObjectResult(arguments[i]));
-                  //  }
-                  //  else if (param.Type != arguments[i].Type && param.Type.IsAssignableFrom(arguments[i].Type))
-                  //  {
-                   //     converted.Add(RuntimeHelpers.EnsureObjectResult(Expression.Convert(arguments[i], param.Type)));
-                  //  }
+                    else if (param.Type == arguments[i].Type)
+                    {
+                        converted.Add(RuntimeHelpers.EnsureObjectResult(arguments[i]));
+                    }
+                    else if (param.Type != arguments[i].Type && param.Type.IsAssignableFrom(arguments[i].Type))
+                    {
+                        converted.Add(RuntimeHelpers.EnsureObjectResult(Expression.Convert(arguments[i], param.Type)));
+                    }
                     else
                         converted.Add(RuntimeHelpers.EnsureObjectResult(RuntimeHelpers.DynamicConvert(arguments[i], param.Type)));
 

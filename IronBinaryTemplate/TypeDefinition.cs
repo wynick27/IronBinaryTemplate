@@ -174,9 +174,11 @@ namespace IronBinaryTemplate
 
         public virtual int RequiredArguments => 0;
 
+        public virtual CustomAttributeCollection CustomAttributes
+            => null;
 
-        public abstract BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args);
-        public abstract BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args);
+        public abstract BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args);
+        public abstract BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args);
 
         public virtual TypeDefinition GetArrayType(int? length = null)
         {
@@ -273,12 +275,12 @@ namespace IronBinaryTemplate
             Name = "void";
         }
         public override Type ClrType { get => typeof(void); internal set { } }
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             throw new InvalidOperationException("Cannot create object of void type.");
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             throw new InvalidOperationException("Cannot create object of void type.");
         }
@@ -344,12 +346,12 @@ namespace IronBinaryTemplate
             return def;
         }
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             return new ScalarVariable(context, this);
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             if (initizlizer == null)
                 initizlizer = Activator.CreateInstance(LocalClrType);
@@ -413,7 +415,7 @@ namespace IronBinaryTemplate
             IsComplete = true;
         }
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             return new ScalarVariable(context, this);
         }
@@ -423,7 +425,7 @@ namespace IronBinaryTemplate
             throw new NotImplementedException();
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             return new LocalVariable("", this, initizlizer);
         }
@@ -462,13 +464,15 @@ namespace IronBinaryTemplate
             return Values.GetHashCode() ^ BitSize ?? 0;
         }
 
-        public ParameterExpression ScopeParam { get; } 
+        public ParameterExpression ScopeParam { get; }
+
+        public Expression ScopeArg => ScopeParam;
 
         public Expression Context => null;
 
         public ParameterExpression GetParameter(string name)
         {
-            if (name == "this")
+            if (name == "$scope")
                 return ScopeParam;
             return null;
         }
@@ -483,6 +487,10 @@ namespace IronBinaryTemplate
     {
         public override TypeDefinition UnderlyingType { get; }
 
+        private CustomAttributeCollection _attributes;
+        public override CustomAttributeCollection CustomAttributes
+            => _attributes;
+
         //  public override bool IsFixedSize => Length != 0 && Element.IsFixedSize;
         public override int? Size => UnderlyingType.Size;
 
@@ -493,7 +501,7 @@ namespace IronBinaryTemplate
 
         public override Type ClrType { get => UnderlyingType.ClrType; internal set => UnderlyingType.ClrType = value; }
 
-        public TypeAliasDefinition(string name, TypeDefinition type)
+        public TypeAliasDefinition(string name, TypeDefinition type, CustomAttributeCollection attributes = null)
         {
             Name = name;
             UnderlyingType = type;
@@ -502,6 +510,7 @@ namespace IronBinaryTemplate
             while (UnderlyingType is TypeAliasDefinition typealias)
                 UnderlyingType = typealias.UnderlyingType;
             IsComplete = true;
+            _attributes = attributes;
         }
 
         public override TypeDefinition GetArrayType(int? length = null)
@@ -521,12 +530,14 @@ namespace IronBinaryTemplate
 
         public override int RequiredArguments => UnderlyingType.RequiredArguments;
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
-            return UnderlyingType.CreateInstance(context, scope, args);
+            var instance = UnderlyingType.CreateInstance(context, scope, args);
+            instance.Type = this;
+            return instance;
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             return UnderlyingType.CreateLocalInstance(scope, initizlizer, args);
         }
@@ -536,6 +547,17 @@ namespace IronBinaryTemplate
             if(other is TypeAliasDefinition alias)
                 return this.Equals(alias.UnderlyingType);
             return UnderlyingType.Equals(other);
+        }
+
+        public override string ToString()
+        {
+            return $"{Name}";
+        }
+
+
+        public override string ToString(string varname)
+        {
+            return $"{Name} {varname}";
         }
     }
 
@@ -557,7 +579,7 @@ namespace IronBinaryTemplate
             References = elemtype.References;
         }
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             
             if (!Length.HasValue)
@@ -580,7 +602,7 @@ namespace IronBinaryTemplate
             
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             //TODO add initializer support.
             if (!Length.HasValue)
@@ -619,7 +641,7 @@ namespace IronBinaryTemplate
         {
         }
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             if (!Length.HasValue)
                 throw new InvalidOperationException("Incomplete type. Cannot create array of undefined size.");
@@ -642,11 +664,12 @@ namespace IronBinaryTemplate
 
     public class CharArrayDefinition : ArrayDefinition
     {
+        public override Type ClrType { get => typeof(byte[]); internal set { } }
         public CharArrayDefinition(int? length) : base(BasicType.FromTypeRank(BasicTypeRank.Char), length)
         {
         }
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             byte[] bytes;
             BinaryTemplateReaderState state = context.SaveState();
@@ -657,7 +680,7 @@ namespace IronBinaryTemplate
             return new BinaryTemplateStringVariable(bytes, this, state);
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             //Todo: chack initializer
             object value = null;
@@ -684,11 +707,12 @@ namespace IronBinaryTemplate
 
     public class WCharArrayDefinition : ArrayDefinition
     {
+        public override Type ClrType { get => typeof(string); internal set { } }
         public WCharArrayDefinition(int? length) : base(BasicType.FromClrType(typeof(char)), length)
         {
         }
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             string bytes;
             var state = context.SaveState();
@@ -717,7 +741,7 @@ namespace IronBinaryTemplate
 
         public Expression Context => Parameters[0];
 
-        public ParameterExpression ScopeParam => Parameters[1];
+        public Expression ScopeArg => Parameters[1];
 
         public List<Expression> Statements { get; }
 
@@ -794,7 +818,7 @@ namespace IronBinaryTemplate
             Children = new DefinitionCollection();
             Parameters = new List<ParameterExpression>();
             Parameters.Add(Expression.Parameter(typeof(BinaryTemplateContext), "$context"));
-            Parameters.Add(Expression.Parameter(typeof(BinaryTemplateScope), "$scope"));
+            Parameters.Add(Expression.Parameter(typeof(IBinaryTemplateScope), "$scope"));
             References = new List<VariableDeclaration>();
             IsComplete = false;
         }
@@ -809,12 +833,13 @@ namespace IronBinaryTemplate
 
 
 
-        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, params object[] args)
+        public override BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, params object[] args)
         {
             if (CompiledFunction == null)
                 CompiledFunction = Compile();
             BinaryTemplateScope childscope = new BinaryTemplateScope(this, context.Position, TypeKind == TypeKind.Union);
-            scope.BeginNewScope(childscope);
+            if (scope is BinaryTemplateScope btscope)
+                btscope.BeginNewScope(childscope);
             
             var objects = new object[] { context, childscope }.Concat(args).ToArray();
             CompiledFunction.DynamicInvoke(objects);
@@ -822,7 +847,7 @@ namespace IronBinaryTemplate
             return childscope;
         }
 
-        public override BinaryTemplateVariable CreateLocalInstance(BinaryTemplateScope scope, object initizlizer, params object[] args)
+        public override BinaryTemplateVariable CreateLocalInstance(IBinaryTemplateScope scope, object initizlizer, params object[] args)
         {
             throw new NotSupportedException("Currently local structs are not supported.");
         }
@@ -843,8 +868,8 @@ namespace IronBinaryTemplate
 
         public ParameterExpression GetParameter(string name)
         {
-            if (name == "this")
-                return ScopeParam as ParameterExpression;
+            if (name == "$scope")
+                return Parameters[1];
             else
             {
                 var result = Parameters.Find(param => param.Name == name);
@@ -869,7 +894,7 @@ namespace IronBinaryTemplate
 
         public List<FunctionCallExpr> References { get; }
 
-        Type ICallableFunction.ReturnType => ReturnType == null ? typeof(void) : ReturnType.ClrType;
+        Type ICallableFunction.ReturnType => ReturnType == null ? typeof(void) : ReturnType.LocalClrType;
 
 
         public Delegate CompiledFunction = null;
@@ -909,7 +934,7 @@ namespace IronBinaryTemplate
         {
             if (LambdaExpression == null)
                 CreateLambdaExpression();
-            var arguments = new List<Expression>() { scope.Context, scope.ScopeParam };
+            var arguments = new List<Expression>() { scope.Context, scope.ScopeArg };
             arguments.AddRange(callarguments);
 
             if ((arguments == null ? 0 : arguments.Count) != LambdaExpression.Parameters.Count)
@@ -942,7 +967,7 @@ namespace IronBinaryTemplate
         public BinaryTemplate Runtime { get; }
         public List<BinaryTemplateError> Errors { get; internal set; }
 
-        public Action<BinaryTemplateContext, BinaryTemplateScope> CompiledFunction { get; private set; }
+        public Action<BinaryTemplateContext, IBinaryTemplateScope> CompiledFunction { get; private set; }
 
         public BinaryTemplateRootDefinition(BinaryTemplate runtime) : base()
         {
@@ -1009,18 +1034,18 @@ namespace IronBinaryTemplate
             return true;
         }
 
-        public new Action<BinaryTemplateContext, BinaryTemplateScope> Compile()
+        public new Action<BinaryTemplateContext, IBinaryTemplateScope> Compile()
         {
             if (CompiledFunction != null)
                 return CompiledFunction;
             
-            var lambda = Expression.Lambda<Action<BinaryTemplateContext, BinaryTemplateScope>>(Expression.Block(Statements), Parameters);
+            var lambda = Expression.Lambda<Action<BinaryTemplateContext, IBinaryTemplateScope>>(Expression.Block(Statements), Parameters);
 
             CompiledFunction = lambda.Compile();
             return CompiledFunction;
         }
 
-        public void Execute(BinaryTemplateContext context, BinaryTemplateScope scope)
+        public void Execute(BinaryTemplateContext context, IBinaryTemplateScope scope)
         {
             Compile()(context, scope);
         }

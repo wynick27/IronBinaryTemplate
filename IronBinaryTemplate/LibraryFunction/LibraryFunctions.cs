@@ -40,16 +40,20 @@ namespace IronBinaryTemplate
             return var.Parent;
         }
 
-        public static bool exists(BinaryTemplateScope scope, params object[] path)
+        public static bool exists(IBinaryTemplateScope scope, params object[] path)
         {
             object result = scope;
             foreach (var pathpart in path)
             {
                 if (result == null)
                     return false;
-                if (pathpart is string name)
+                if (pathpart is IBinaryTemplateScope childscope)
                 {
-                    if (scope is IBinaryTemplateScope ibtscope)
+                    result = childscope;
+                }
+                else if (pathpart is string name)
+                {
+                    if (result is IBinaryTemplateScope ibtscope)
                         result = ibtscope.GetVariable(name);
                     else
                     {
@@ -62,7 +66,7 @@ namespace IronBinaryTemplate
                 }
                 else if (pathpart is int index)
                 {
-                    if (scope is IBinaryTemplateArray btarray)
+                    if (result is IBinaryTemplateArray btarray)
                         result = btarray.GetVariable(index);
                     else
                     {

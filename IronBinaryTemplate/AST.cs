@@ -56,7 +56,7 @@ namespace IronBinaryTemplate
 
         protected void Compile()
         {
-            CompiledFunction = Expression.Lambda<Func<IBinaryTemplateScope, object>>(this, LexicalScope.ScopeParam).Compile(true);
+            CompiledFunction = Expression.Lambda<Func<IBinaryTemplateScope, object>>(this, LexicalScope.GetParameter("$scope")).Compile(true);
         }
         
     }
@@ -109,7 +109,10 @@ namespace IronBinaryTemplate
 
         public List<Expression> GetPathExpressions()
         {
-            return new List<Expression>() { Expression.Constant(VariableName) };
+            Expression expr = StaticBoundExpression;
+            if (expr == null)
+                expr = Expression.Constant(VariableName);
+            return new List<Expression>() { expr };
         }
 
         public override Expression Reduce()
@@ -118,10 +121,10 @@ namespace IronBinaryTemplate
             if (boundExpression != null)
                 return AccessMode == ValueAccess.ByValue ? Expression.Convert(boundExpression,typeof(object)) : boundExpression;
             if (AccessMode != ValueAccess.Wrapper)
-                return Expression.MakeIndex(LexicalScope.GetParameter("this"), typeof(IBinaryTemplateScope).GetProperties().First(x => x.GetIndexParameters().Length > 0),
+                return Expression.MakeIndex(LexicalScope.GetParameter("$scope"), typeof(IBinaryTemplateScope).GetProperties().First(x => x.GetIndexParameters().Length > 0),
                 new Expression[] { Expression.Constant(VariableName) });
             else
-                return Expression.Call(LexicalScope.GetParameter("this"), typeof(IBinaryTemplateScope).GetMethod("GetVariable"),
+                return Expression.Call(LexicalScope.GetParameter("$scope"), typeof(IBinaryTemplateScope).GetMethod("GetVariable"),
                 new Expression[] { Expression.Constant(VariableName) });
         }
 
@@ -508,7 +511,7 @@ namespace IronBinaryTemplate
         ParameterExpression[] GetParameterList();
 
         ParameterExpression GetParameter(string name);
-        ParameterExpression ScopeParam { get; }
+        Expression ScopeArg { get; }
         Expression Context { get; }
     }
 
@@ -523,7 +526,7 @@ namespace IronBinaryTemplate
     public class CustomAttribute : ILexicalScope
     {
         public AttributeKind AttributeKind { get; internal set; }
-
+        FunctionCallExpr FunctionCallExpr;
 
         public virtual string AsName()
         {
@@ -540,13 +543,23 @@ namespace IronBinaryTemplate
 
         public virtual object Eval(BinaryTemplateVariable var)
         {
-            return Expr.Eval(new BinaryTemplateVariableScope(var));
+            if (FunctionCallExpr != null)
+                return FunctionCallExpr.Eval(new BinaryTemplateVariableScope(var));
+            else
+                return Expr.Eval(new BinaryTemplateVariableScope(var));
         }
         public virtual T Eval<T>(BinaryTemplateVariable var)
         {
             try
             {
+                if (Function != null && FunctionCallExpr == null)
+                {
+                    FunctionCallExpr = new FunctionCallExpr(AsName(), this, new() { new VariableAccessExpr("this", this) });
+                    FunctionCallExpr.Function = Function;
+                }
                 object obj = Eval(var);
+                if (obj == null)
+                    return default(T);
                 return RuntimeHelpers.ChangeType<T>(obj);
             }
             catch (Exception ex)
@@ -562,7 +575,7 @@ namespace IronBinaryTemplate
         }
 
         public ParameterExpression GetParameter(string name)
-            => null;
+            => name == "$scope" ? ScopeParam : null;
 
         public string Name { get; }
 
@@ -570,7 +583,10 @@ namespace IronBinaryTemplate
 
         public ParameterExpression ScopeParam { get; }
 
-        public Expression Context => null;
+        public Expression ScopeArg
+            => ScopeParam;
+
+        public Expression Context => Expression.Property(Expression.Convert(new VariableAccessExpr("this",this),typeof(BinaryTemplateVariable)),"Context");
 
         public ICallableFunction Function { get; internal set; }
 
@@ -714,10 +730,12 @@ namespace IronBinaryTemplate
             return typedef;
         }
 
-        public BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, BinaryTemplateScope scope, IList<int?> arrayarguments, IList<object> arguments,object initializer = null)
+        public BinaryTemplateVariable CreateInstance(BinaryTemplateContext context, IBinaryTemplateScope scope, IList<int?> arrayarguments, IList<object> arguments,object initializer = null)
         {
             var typedef = GetTypeDefinition(arrayarguments);
-            scope.BeginNewVariable(Name);
+            var btscope = scope as BinaryTemplateScope;
+            if (btscope != null)
+                btscope.BeginNewVariable(Name);
             BinaryTemplateVariable variable;
             if (IsLocal)
             {
@@ -725,7 +743,8 @@ namespace IronBinaryTemplate
             }
             else
                 variable = typedef.CreateInstance(context, scope, arguments.ToArray());
-            scope.EndNewVariable(variable);
+            if (btscope != null)
+                btscope.EndNewVariable(variable);
             variable.CustomAttributes = this.CustomAttributes;
             return variable;
 
@@ -769,7 +788,7 @@ namespace IronBinaryTemplate
                       initializerexpr = Expression.Constant(null);
 
                   return Expression.Call(Expression.Constant(this), typeof(VariableDeclaration).GetMethod("CreateInstance"),
-                      Parent.Context, Parent.ScopeParam, arraydimensions, converted, initializerexpr);
+                      Parent.Context, Parent.ScopeArg, arraydimensions, converted, initializerexpr);
               });
         }
 

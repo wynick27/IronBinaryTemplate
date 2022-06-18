@@ -245,7 +245,7 @@ namespace IronBinaryTemplate
                 return 0;
             else if (bitsize < 0)
                 throw new ArgumentException("Bitsize cannot be negative", "bitsize");
-            else if (bitsize > 16)
+            else if (bitsize > 31)
                 throw new ArgumentException("Bitsize too large.", "bitsize");
             return _paddedMode ? (int)ReadPackedSBits(bitsize, 4) : (int)ReadSignedBits(bitsize);
 
@@ -257,7 +257,7 @@ namespace IronBinaryTemplate
                 return 0;
             else if (bitsize < 0)
                 throw new ArgumentException("Bitsize cannot be negative", "bitsize");
-            else if (bitsize > 16)
+            else if (bitsize > 64)
                 throw new ArgumentException("Bitsize too large.", "bitsize");
             return _paddedMode ? ReadPackedSBits(bitsize, 8) : ReadSignedBits(bitsize);
         }
@@ -279,7 +279,7 @@ namespace IronBinaryTemplate
                 return 0;
             else if (bitsize < 0)
                 throw new ArgumentException("Bitsize cannot be negative", "bitsize");
-            else if (bitsize > 16)
+            else if (bitsize > 32)
                 throw new ArgumentException("Bitsize too large.", "bitsize");
             return _paddedMode ? (uint)ReadPackedUBits(bitsize, 4) : (uint)ReadUnsignedBits(bitsize);
 
@@ -291,7 +291,7 @@ namespace IronBinaryTemplate
                 return 0;
             else if (bitsize < 0)
                 throw new ArgumentException("Bitsize cannot be negative", "bitsize");
-            else if (bitsize > 16)
+            else if (bitsize > 64)
                 throw new ArgumentException("Bitsize too large.", "bitsize");
             return _paddedMode ? ReadPackedUBits(bitsize, 8) : ReadUnsignedBits(bitsize);
         }

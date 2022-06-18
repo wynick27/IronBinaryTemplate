@@ -27,6 +27,16 @@ namespace IronBinaryTemplate
         public virtual BinaryTemplateContext Context { get => Parent?.Context; }
         public BinaryTemplateScope Parent { get; internal set; }
         public CustomAttributeCollection CustomAttributes { get; internal set; }
+
+        public bool TryGetAttribute(string name, out CustomAttribute attr)
+        {
+            if (CustomAttributes != null && CustomAttributes.TryGetValue(name, out attr))
+                return true;
+            if (Type != null && Type.CustomAttributes != null && Type.CustomAttributes.TryGetValue(name, out attr))
+                return true;
+            attr = null;
+            return false;
+        }
     }
 
     /// <summary>
@@ -526,8 +536,13 @@ namespace IronBinaryTemplate
                 return Variable;
             else if (Arguments.TryGetValue(name, out object obj))
                 return new LocalVariable(name, TypeDefinition.FromClrType(obj.GetType()), obj);
-            else
-                return Variable.Parent.GetVariable(name);
+            else if (Variable is IBinaryTemplateScope btscope)
+            {
+                var variable = btscope.GetVariable(name);
+                if (variable != null)
+                    return variable;
+            }
+            return Variable.Parent.GetVariable(name);
         }
     }
 
@@ -648,6 +663,20 @@ namespace IronBinaryTemplate
             s2.CopyTo(newstr, s1.data.Length);
             return new BinaryTemplateString(newstr, s1.encoding);
         }
+
+        public static BinaryTemplateString operator +(BinaryTemplateString s1, BinaryTemplateString s2)
+        {
+            return s1 + s2.data;
+        }
+        public static BinaryTemplateString operator +(byte[] s1, BinaryTemplateString s2)
+        {
+            var newstr = new byte[s1.Length + s2.data.Length];
+            s1.CopyTo(newstr, 0);
+            s2.data.CopyTo(newstr, s1.Length);
+            return new BinaryTemplateString(newstr, s2.encoding);
+        }
+
+
         public static bool operator ==(BinaryTemplateString s1, BinaryTemplateString s2)
         {
             if (ReferenceEquals(s1, s2))

@@ -49,9 +49,9 @@ namespace IronBinaryTemplate
                         j++;
                         continue;
                     }
-                    else if (param.ParameterType == typeof(BinaryTemplateScope))
+                    else if (param.ParameterType.IsAssignableTo(typeof(IBinaryTemplateScope)))
                     {
-                        converted.Add(scope.ScopeParam);
+                        converted.Add(scope.ScopeArg);
                         j++;
                         continue;
                     }
@@ -100,14 +100,14 @@ namespace IronBinaryTemplate
         {
             var parameters = method.GetParameters();
             var converted = new List<Expression>();
-            var thisExpr = scope.GetParameter("this");
+            var scopeExpr = scope.ScopeArg;
             if (requirethis)
             {
                 
                 if (method.DeclaringType.IsAssignableFrom(typeof(BinaryTemplateContext)) && scope.Context != null)
                     converted.Add(scope.Context);
-                else if (thisExpr !=null && method.DeclaringType.IsAssignableFrom(thisExpr.Type))
-                    converted.Add(thisExpr);
+                else if (scopeExpr !=null && method.DeclaringType.IsAssignableFrom(scopeExpr.Type))
+                    converted.Add(scopeExpr);
                 else
                     throw new InvalidOperationException($"Function requires an object instance of type {method.DeclaringType}.");
             }
@@ -166,14 +166,14 @@ namespace IronBinaryTemplate
                 throw new InvalidOperationException($"Function called with too many arguments.");
             }
             Expression arg = arguments[0];
-            ParameterExpression param = scope.ScopeParam as ParameterExpression;
-            if (param == null || param.Type != typeof(BinaryTemplateScope))
-                throw new InvalidOperationException($"{Method.Name}() requires a scope parameter.");
+            Expression scopeArg = scope.ScopeArg;
+            if (scopeArg == null || !scopeArg.Type.IsAssignableTo(typeof(IBinaryTemplateScope)))
+                throw new InvalidOperationException($"{Method.Name}() requires a scope argument.");
             if (arg is ILValue lvalue)
             {
                 lvalue.AccessMode = ValueAccess.Wrapper;
                 arguments = lvalue.GetPathExpressions();
-                arguments.Insert(0, param);
+                arguments.Insert(0, scopeArg);
             }
             else
                 throw new InvalidOperationException($"Arguments for {Method.Name}() must be lvalue.");

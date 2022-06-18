@@ -9,10 +9,9 @@ namespace IronBinaryTemplate
         object this[string name]
         {
             get {
-                var scope = this as BinaryTemplateScope;
-                    if (!scope.TryGetVariable(name, out BinaryTemplateVariable var))
-                        throw new MemberAccessException(name);
-                    Console.WriteLine($"{scope.Context.Position} IGetVariable {name} = {var.Value}");
+                BinaryTemplateVariable var = this.GetVariable(name);
+                //        throw new MemberAccessException(name);
+                   // Console.WriteLine($"{scope.Context.Position} IGetVariable {name} = {var.Value}");
                     if (var is IBinaryTemplateScope || var is IBinaryTemplateArray)
                         return var;
                     else
@@ -20,11 +19,11 @@ namespace IronBinaryTemplate
             }
             set 
             {
-                var scope = this as BinaryTemplateScope;
-                if (!scope.TryGetVariable(name, out BinaryTemplateVariable var))
-                        throw new MemberAccessException(name);
-                    Console.WriteLine($"{scope.Context.Position} TSetVariable {name} = {var.Value}");
-                    var.Value = value;
+                BinaryTemplateVariable var = this.GetVariable(name);
+                //if (!scope.TryGetVariable(name, out BinaryTemplateVariable var))
+                //        throw new MemberAccessException(name);
+                //    Console.WriteLine($"{scope.Context.Position} TSetVariable {name} = {var.Value}");
+                var.Value = value;
 
             }
         }

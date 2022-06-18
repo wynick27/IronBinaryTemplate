@@ -80,7 +80,7 @@ namespace IronBinaryTemplate
             var targetexpr = target.Expression;
             var targettype = target.LimitType;
             BindingRestrictions restrictions = target.Restrictions;
-            if (target.LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && !this.Type.IsAssignableFrom(typeof(BinaryTemplateVariable)) && (target.Value as BinaryTemplateVariable).Value != target.Value)
+            if (target.Value is BinaryTemplateDuplicatedArray || target.LimitType.IsAssignableTo(typeof(BinaryTemplateVariable)) && !this.Type.IsAssignableFrom(target.LimitType) && (target.Value as BinaryTemplateVariable).Value != target.Value)
             {
                 targetexpr = Expression.Property(Expression.Convert(target.Expression, typeof(BinaryTemplateVariable)), "Value");
                 targettype = (target.Value as BinaryTemplateVariable).Value.GetType();

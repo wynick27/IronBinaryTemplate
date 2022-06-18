@@ -128,6 +128,7 @@ namespace IronBinaryTemplate
                 
                 var script = visitor.VisitCompilationUnit(tree);
                 script.Name = filename;
+                script.Errors = errorListener.Errors;
                 return script;
             }
             catch (PreprocessorError ex)
